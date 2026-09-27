@@ -1,0 +1,8 @@
+Hammurapi {{ .Chart.AppVersion }} is deployed.
+
+  URL:            {{ .Values.config.PUBLIC_URL }}
+  Webhook:        {{ .Values.config.PUBLIC_URL }}/hooks/v1/git   (secret: WEBHOOK_SECRET)
+  OAuth callback: {{ .Values.config.PUBLIC_URL }}/api/v1/auth/callback
+
+The first sign-in of a login listed in BOOTSTRAP_ADMINS gets the global administrator role.
+Cleaner schedule: {{ .Values.cleaner.schedule }}

@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hammurapi.fullname" . }}-cleaner
+  labels:
+    {{- include "hammurapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cleaner
+spec:
+  schedule: {{ .Values.cleaner.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: {{- include "hammurapi.selector" (dict "root" . "component" "cleaner") | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: cleaner
+              image: {{ include "hammurapi.coreImage" . }}
+              args: ["cleaner"]
+              {{- include "hammurapi.envFrom" . | nindent 14 }}
+              resources: {{- toYaml .Values.cleaner.resources | nindent 16 }}
+              securityContext: {{- toYaml .Values.securityContext | nindent 16 }}

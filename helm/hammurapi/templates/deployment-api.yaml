@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hammurapi.fullname" . }}-api
+  labels:
+    {{- include "hammurapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "hammurapi.selector" (dict "root" . "component" "api") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          # Instance image: Hammurapi + the ACP agent (subprocess over stdio).
+          image: {{ include "hammurapi.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["api"]
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: service, containerPort: 9100 }
+          {{- include "hammurapi.envFrom" . | nindent 10 }}
+          {{- with .Values.api.extraEnv }}
+          env: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- include "hammurapi.probes" . | nindent 10 }}
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}

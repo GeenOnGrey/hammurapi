@@ -1,0 +1,126 @@
+# Hammurapi — local environment (arch spec §18).
+#
+#   cp .env.example .env         # or run install/install.sh
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# Expects hammurapi-core and hammurapi-web checked out next to this repository.
+# The git provider is external (GitHub or GitLab). For a demo without one, start
+# the "demo" profile: an in-memory fake GitLab (development only):
+#
+#   docker compose --profile demo up -d --build
+#
+# The cleaner runs on demand: docker compose run --rm api cleaner
+
+name: hammurapi
+
+x-hammurapi: &hammurapi
+  env_file: .env
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_DB: hammurapi, POSTGRES_USER: hammurapi, POSTGRES_PASSWORD: hammurapi }
+    ports: ["5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U hammurapi"], interval: 5s, retries: 10 }
+
+  # bitnami/kafka is no longer published; the official Apache image runs KRaft.
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports: ["9092:9092"]
+    volumes: ["kafka-data:/var/lib/kafka/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      retries: 12
+
+  # minio/minio is no longer published on Docker Hub; Chainguard ships the same server.
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment: { MINIO_ROOT_USER: hammurapi, MINIO_ROOT_PASSWORD: hammurapi123 }
+    user: "0"
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio-data:/data"]
+
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    environment: { ASR_MODEL: small, ASR_ENGINE: openai_whisper }
+    ports: ["9091:9000"]
+    profiles: ["voice"]
+
+  migrate:
+    <<: *hammurapi
+    build: { context: ../hammurapi-core }
+    image: hammurapi:local
+    command: ["migrate"]
+    restart: "no"
+    depends_on: { postgres: { condition: service_healthy } }
+
+  api:
+    <<: *hammurapi
+    # Hammurapi + agent: the agent runs as a subprocess of api (ACP over stdio).
+    build:
+      context: .
+      dockerfile: Dockerfile.instance
+      target: ${AGENT_TARGET:-fake}
+      additional_contexts:
+        hammurapi: service:migrate
+    image: hammurapi-instance:local
+    command: ["api"]
+    ports: ["8090:8080", "9100:9100"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka: { condition: service_healthy }
+      minio: { condition: service_started }
+
+  worker:
+    <<: *hammurapi
+    image: hammurapi:local
+    command: ["worker"]
+    ports: ["9101:9100"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka: { condition: service_healthy }
+      minio: { condition: service_started }
+
+  # The SPA and a reverse proxy to api: one origin for cookies (PUBLIC_URL).
+  web:
+    build: { context: ../hammurapi-web }
+    image: hammurapi-web:local
+    environment: { API_UPSTREAM: "api:8080" }
+    ports: ["8080:8080"]
+    restart: unless-stopped
+    depends_on: [api]
+
+  # Development only: in-memory GitLab imitation (OAuth, repository, MRs, webhooks).
+  fakegitlab:
+    build: { context: ../hammurapi-core, target: fakegitlab }
+    image: hammurapi-fakegitlab:local
+    profiles: ["demo"]
+    environment:
+      FAKE_PUBLIC_URL: http://localhost:8929
+      FAKE_WEBHOOK_URL: http://api:8080/hooks/v1/git
+      FAKE_SEED_DIR: /seed/rules
+      FAKE_USERS: "admin:Admin,anna:Anna K.,oleg:Oleg D."
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+    env_file: .env
+    volumes: ["./rules:/seed/rules:ro"]
+    ports: ["8929:8929"]
+
+volumes: { postgres-data: {}, kafka-data: {}, minio-data: {} }

@@ -1,0 +1,30 @@
+# Instance image = Hammurapi image + an ACP agent (arch spec §19).
+# The agent runs as a subprocess of `hammurapi api` and must live in the same
+# container. Pick a target:
+#
+#   fake    scripted test agent shipped with Hammurapi (no LLM; for smoke tests)
+#   claude  Claude Code through its ACP adapter (needs Node.js and ANTHROPIC_API_KEY)
+#
+# docker build -f Dockerfile.instance --target claude \
+#   --build-context hammurapi=docker-image://registry.example.com/hammurapi:1.0.0 .
+#
+# In docker compose the `hammurapi` context is the locally built core image.
+
+# ─── fake: distroless base, agent already inside ─────────────────────
+FROM hammurapi AS fake
+# ACP_AGENT_COMMAND=/usr/local/bin/hammurapi-fakeagent
+
+# ─── claude: Node.js runtime + Claude Code ACP adapter ───────────────
+# A distroless base cannot run Node.js, so the runtime image is the base here
+# and the Hammurapi binary is copied in.
+FROM node:24-slim AS claude
+ARG ACP_ADAPTER=@agentclientprotocol/claude-agent-acp
+RUN npm install -g "${ACP_ADAPTER}" && npm cache clean --force
+COPY --from=hammurapi /usr/local/bin/hammurapi /usr/local/bin/hammurapi
+USER node
+WORKDIR /home/node
+EXPOSE 8080 9100
+ENTRYPOINT ["/usr/local/bin/hammurapi"]
+CMD ["api"]
+# ACP_AGENT_COMMAND=claude-agent-acp
+# ACP_AGENT_ENV=ANTHROPIC_API_KEY=sk-ant-...

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: hammurapi
+description: Hammurapi — product specifications through quality gates, with an AI agent and git as the source of truth
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords: [specifications, quality-gates, acp, agent]
+home: https://github.com/GeenOnGrey/hammurapi
+sources:
+  - https://github.com/GeenOnGrey/hammurapi-core
+  - https://github.com/GeenOnGrey/hammurapi-web
