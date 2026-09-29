@@ -11,6 +11,12 @@
 #   docker compose --profile demo up -d --build
 #
 # The cleaner runs on demand: docker compose run --rm api cleaner
+#
+# Agent tasks (code generation, reverts) run with RUNNER_EXECUTOR=local as
+# subprocesses of the worker, in the runner-work volume — for development and
+# demos only; production uses the k8s executor (a Job per task).
+#
+# Metric sources for Discovery: docker compose --profile metrics up -d starts ClickHouse.
 
 name: hammurapi
 
@@ -83,21 +89,42 @@ services:
         hammurapi: service:migrate
     image: hammurapi-instance:local
     command: ["api"]
+    environment:
+      # Internal API (:8081): the chat's MCP endpoint and the runner task API.
+      INTERNAL_ADDR: ":8081"
+      INTERNAL_URL: http://api:8081
     ports: ["8090:8080", "9100:9100"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       kafka: { condition: service_healthy }
       minio: { condition: service_started }
 
+  # Workflows, webhooks, imports, Discovery/generation agent sessions and runner
+  # tasks: the worker needs the agent too, so it uses the instance image.
   worker:
     <<: *hammurapi
-    image: hammurapi:local
+    image: hammurapi-instance:local
     command: ["worker"]
+    environment:
+      INTERNAL_URL: http://api:8081
+      RUNNER_EXECUTOR: local
+      RUNNER_WORKDIR: /var/lib/hammurapi/runs
+      RUNNER_MAX_PARALLEL: "2"
+    volumes: ["runner-work:/var/lib/hammurapi/runs"]
     ports: ["9101:9100"]
     depends_on:
+      api: { condition: service_started }
       migrate: { condition: service_completed_successfully }
       kafka: { condition: service_healthy }
       minio: { condition: service_started }
+
+  # Metric sources for Discovery (read-only account "metrics", database "metrics").
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    profiles: ["metrics"]
+    environment: { CLICKHOUSE_USER: metrics, CLICKHOUSE_PASSWORD: metrics, CLICKHOUSE_DB: metrics }
+    ports: ["8123:8123"]
+    volumes: ["clickhouse-data:/var/lib/clickhouse"]
 
   # The SPA and a reverse proxy to api: one origin for cookies (PUBLIC_URL).
   web:
@@ -108,7 +135,8 @@ services:
     restart: unless-stopped
     depends_on: [api]
 
-  # Development only: in-memory GitLab imitation (OAuth, repository, MRs, webhooks).
+  # Development only: in-memory GitLab imitation — the specification repository,
+  # service repositories, MRs, CI results, pipelines, tags and webhooks.
   fakegitlab:
     build: { context: ../hammurapi-core, target: fakegitlab }
     image: hammurapi-fakegitlab:local
@@ -116,11 +144,16 @@ services:
     environment:
       FAKE_PUBLIC_URL: http://localhost:8929
       FAKE_WEBHOOK_URL: http://api:8080/hooks/v1/git
+      FAKE_SPEC_REPO: ${GIT_REPO:-demo/specs}
       FAKE_SEED_DIR: /seed/rules
+      FAKE_SERVICE_REPOS: "demo/booking=FMS/CAR,demo/pricing=FMS/CAR"
       FAKE_USERS: "admin:Admin,anna:Anna K.,oleg:Oleg D."
+      FAKE_GROUPS: "team-fleet:anna;oleg"
+      FAKE_BOT_TOKEN: ${GITLAB_BOT_TOKEN:-}
+      FAKE_CI_SECRET: ${CI_RESULTS_SECRET:-}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     env_file: .env
     volumes: ["./rules:/seed/rules:ro"]
     ports: ["8929:8929"]
 
-volumes: { postgres-data: {}, kafka-data: {}, minio-data: {} }
+volumes: { postgres-data: {}, kafka-data: {}, minio-data: {}, runner-work: {}, clickhouse-data: {} }

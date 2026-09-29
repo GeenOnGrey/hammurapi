@@ -1,5 +1,10 @@
 # Architecture: <feature title>
 
+## Affected services and contracts
+
+| Service | Role in the feature | Changing contracts (API, events) |
+| --- | --- | --- |
+
 ## Components
 
 Services, stores and external systems involved.
@@ -24,6 +29,11 @@ Authentication, authorization, secrets, limits.
 ## Observability
 
 Logs, metrics, traces, health checks.
+
+## Rollout order
+
+Dependencies between the changes of the services: what ships first, contract compatibility. A
+release merges and deploys the services in the order they are first mentioned here.
 
 ## Decisions
 

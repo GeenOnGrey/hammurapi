@@ -1,8 +1,14 @@
 Hammurapi {{ .Chart.AppVersion }} is deployed.
 
   URL:            {{ .Values.config.PUBLIC_URL }}
-  Webhook:        {{ .Values.config.PUBLIC_URL }}/hooks/v1/git   (secret: WEBHOOK_SECRET)
+  Webhook:        {{ .Values.config.PUBLIC_URL }}/hooks/v1/git   (secret: WEBHOOK_SECRET; spec, service and catalog repositories)
+  CI results:     {{ .Values.config.PUBLIC_URL }}/hooks/v1/ci-results   (HMAC: CI_RESULTS_SECRET)
+  Deploy status:  {{ .Values.config.PUBLIC_URL }}/hooks/v1/deploy       (secret: Administration → Deploy)
+  Feature flags:  {{ .Values.config.PUBLIC_URL }}/hooks/v1/feature-flags (secret: Administration → Cycle)
   OAuth callback: {{ .Values.config.PUBLIC_URL }}/api/v1/auth/callback
 
 The first sign-in of a login listed in BOOTSTRAP_ADMINS gets the global administrator role.
 Cleaner schedule: {{ .Values.cleaner.schedule }}
+{{- if eq .Values.runner.executor "k8s" }}
+Code tasks run as Jobs in namespace {{ .Values.runner.namespace }}; create Secret {{ .Values.runner.agentSecret }} there with the agent credentials.
+{{- end }}

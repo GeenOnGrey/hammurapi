@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# End-to-end smoke test against the demo stack:
+# End-to-end smoke test of the closed cycle (PLT.HMR-0002) against the demo stack:
 #   docker compose --profile demo up -d --build && scripts/e2e-smoke.sh
-# Uses the fake GitLab (sign-in as any login) and the scripted fake agent.
+# Uses the fake GitLab (sign-in as any login; specification and service
+# repositories, MRs, CI results, deploy target, Prometheus) and the scripted
+# fake agent (Discovery, tech/qa generation, code generation in the runner).
+#
+# Scenario (qa spec OPS-01): issue → Discovery → feature → gates (tech/qa
+# generated) → code generation (runner, local executor) → validation →
+# release (merge in order, deploy marks, confirmation) → second release with a
+# configured deploy pipeline → rollback.
 set -euo pipefail
 
 WEB=${WEB:-http://localhost:8080}
 GITLAB=${GITLAB:-http://localhost:8929}
-SPECS_ZIP_SRC=${SPECS_ZIP_SRC:-}
+API_SERVICE=${API_SERVICE:-http://localhost:9100}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 pass=0
@@ -36,117 +43,159 @@ call() {
 }
 status() { cat "$TMP/status"; }
 expect() { [[ $(status) == "$1" ]] || die "$2: HTTP $(status) $(cat "$TMP/body")"; ok "$2"; }
-wait_for() { # wait_for <description> <command…>
+wait_for() { # wait_for <description> <command…> (up to 90 s)
   local d=$1; shift
-  for _ in $(seq 1 40); do if "$@" >/dev/null 2>&1; then ok "$d"; return; fi; sleep 0.5; done
+  for _ in $(seq 1 180); do if "$@" >/dev/null 2>&1; then ok "$d"; return; fi; sleep 0.5; done
   die "timeout: $d"
 }
+field() { call "$1" GET "$2" | json "$3"; }
 
-echo "Sign-in"
+echo "Sign-in and roles (R39)"
 login admin; ok "admin signed in through the provider (bootstrap global admin)"
 me=$(call admin GET /api/v1/auth/me); [[ $(echo "$me" | json 'd["globalAdmin"]') == True ]] || die "bootstrap admin"; ok "BOOTSTRAP_ADMINS grants global admin"
-login anna; ok "anna signed in"
-call anna POST /admin/api/v1/domains '{"key":"XX","name":"x"}' >/dev/null; expect 403 "non-admin cannot change the dictionary"
-curl -s -b "$TMP/admin" -X POST -H 'Content-Type: application/json' -d '{}' -o /dev/null -w '%{http_code}' "$WEB/api/v1/features" | grep -q 403 && ok "CSRF token is required" || die "csrf"
-
-echo "Roles and dictionary"
+login anna; login oleg; ok "anna and oleg signed in"
 ADMIN_ID=$(echo "$me" | json 'd["id"]')
-ANNA_ID=$(call anna GET /api/v1/auth/me | json 'd["id"]')
-all='["product","design","arch","tech","qa"]'
-call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" "{\"globalAdmin\":true,\"roles\":[{\"role\":\"editor\",\"areas\":$all},{\"role\":\"approver\",\"areas\":$all},{\"role\":\"admin\",\"areas\":[\"product\"]}]}" >/dev/null; expect 204 "admin roles set"
-call admin PUT "/admin/api/v1/users/$ANNA_ID/roles" '{"globalAdmin":false,"roles":[{"role":"editor","areas":["product"]},{"role":"admin","areas":["product"]}]}' >/dev/null; expect 204 "anna: editor + admin of product"
-call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":false,"roles":[]}' >/dev/null; expect 409 "last global admin cannot be removed"
+ANNA_ID=$(field anna GET /api/v1/auth/me 'd["id"]')
+OLEG_ID=$(field oleg GET /api/v1/auth/me 'd["id"]')
+call anna POST /admin/api/v1/domains '{"key":"XX","name":"x"}' >/dev/null; expect 403 "non-admin cannot change the dictionary"
+call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":true,"areaAdmin":["product"]}' >/dev/null; expect 204 "roles: global admin + product area admin (no editor/approver roles)"
+call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":false,"areaAdmin":[]}' >/dev/null; expect 409 "last global admin cannot be removed"
+
+echo "Dictionary, experts, services (R10, R11, R17)"
 call admin POST /admin/api/v1/domains '{"key":"FMS","name":"Fleet","approvalRequired":true}' >/dev/null; expect 201 "domain FMS"
 call admin POST /admin/api/v1/domains/FMS/systems '{"key":"CAR","name":"Cars"}' >/dev/null; expect 201 "system FMS/CAR"
-call admin POST /admin/api/v1/domains '{"key":"PLT","name":"Platform","approvalRequired":false}' >/dev/null; expect 201 "domain PLT without approval"
-call admin POST /admin/api/v1/domains/PLT/systems '{"key":"HMR","name":"Hammurapi"}' >/dev/null; expect 201 "system PLT/HMR"
-call admin POST /admin/api/v1/domains '{"key":"FMS","name":"Again"}' >/dev/null; expect 409 "duplicate domain key"
-call admin PATCH /api/v1/profile '{"domains":["FMS"],"language":"ru"}' >/dev/null; expect 200 "profile: my domains + language"
+call admin PUT /admin/api/v1/domains/FMS/experts "{\"product\":[\"$ANNA_ID\"],\"technical\":[\"$OLEG_ID\",\"$ANNA_ID\"]}" >/dev/null; expect 204 "experts of FMS: anna (product, technical), oleg (technical)"
+call admin POST /admin/api/v1/services '{"key":"booking","name":"Booking","system":"FMS/CAR","repo":"demo/booking","ownerRef":"user:anna"}' >/dev/null; expect 201 "service booking (manual catalog)"
+call admin POST /admin/api/v1/services '{"key":"pricing","name":"Pricing","system":"FMS/CAR","repo":"demo/pricing","ownerRef":"group:team-fleet"}' >/dev/null; expect 201 "service pricing owned by group:team-fleet"
+login anna # new roles
+call anna PUT /api/v1/services/pricing/autonomy '{"level":"autonomous"}' >/dev/null; expect 204 "owner sets autonomy of pricing"
+login oleg
+call oleg PUT /api/v1/services/booking/autonomy '{"level":"plan"}' >/dev/null; expect 403 "non-owner cannot change autonomy (CG-07)"
+call admin POST /admin/api/v1/metric-sources '{"name":"demo","type":"prometheus","endpoint":"http://fakegitlab:8929/fake/prometheus"}' >/dev/null; expect 201 "metric source demo (Prometheus)"
+v=$(call admin POST /admin/api/v1/metric-sources/demo/test '{"query":"sum(hammurapi_demo_value)"}' | json 'd["value"]'); [[ $v == 42.0 ]] && ok "metric source dry run returns a value (MET-04)" || die "metric test: $v"
 
-echo "Feature lifecycle"
-F=$(call admin POST /api/v1/features '{"domain":"FMS","system":"CAR","title":"Weekend booking"}' | json 'd["uniqueId"]'); expect 201 "feature created: $F"
-[[ $F == FMS.CAR-0001 ]] || die "numbering"
-doc=$(call admin GET "/api/v1/features/$F/gates/product/document")
-echo "$doc" | json 'd["content"]' | head -1 | grep -q "Product specification: Weekend booking" && ok "document created from rules/product/template.md" || die "template"
-sha=$(echo "$doc" | json 'd["sha"]')
-call admin PUT "/api/v1/features/$F/gates/product/document" "{\"content\":\"# Weekend booking\\n\\nFirst draft.\\n\",\"baseSha\":\"$sha\"}" >/dev/null; expect 200 "document saved (commit)"
-call admin PUT "/api/v1/features/$F/gates/product/document" "{\"content\":\"# x\\n\",\"baseSha\":\"$sha\"}" >/dev/null; expect 409 "stale baseSha refused"
-history_has() { call admin GET "/api/v1/features/$F/gates/$1/history" | grep -q "\"$2\""; }
-wait_for "push webhook → Kafka → worker wrote 'edited'" history_has product edited
-call anna PUT "/api/v1/features/$F/gates/product/document" '{"content":"# anna\n"}' >/dev/null; expect 423 "another user is locked out while admin edits"
-call admin DELETE "/api/v1/features/$F/lock" >/dev/null; expect 204 "lock released"
-call admin POST "/api/v1/features/$F/gates/product/approve" >/dev/null; expect 409 "draft cannot be approved"
-call admin POST "/api/v1/features/$F/gates/product/submit" >/dev/null; expect 200 "submitted for approval"
-n=$(call admin GET /api/v1/approvals | json 'len(d["items"])'); [[ $n == 1 ]] && ok "appears in 'awaiting your approval'" || die "approvals list: $n"
-call admin POST "/api/v1/features/$F/gates" '{"area":"design"}' >/dev/null; expect 201 "design gate added"
-call admin DELETE "/api/v1/features/$F/lock" >/dev/null
-call admin POST "/api/v1/features/$F/gates/design/submit" >/dev/null; expect 200 "design submitted"
-call admin POST "/api/v1/features/$F/gates/design/approve" >/dev/null; expect 409 "design cannot be approved before product"
-call admin POST "/api/v1/features/$F/gates/product/approve" >/dev/null; expect 200 "product approved"
-call admin POST "/api/v1/features/$F/handoff" >/dev/null; expect 409 "hand-off needs all gates approved"
-call admin POST "/api/v1/features/$F/gates/design/approve" >/dev/null; expect 200 "design approved"
-call admin GET "/api/v1/features/$F/gates/product/diff" | grep -q "Weekend booking" && ok "diff since approval shows the document" || die "diff"
-call admin POST "/api/v1/features/$F/handoff" >/dev/null; expect 204 "handed off (MR merged)"
-st=$(call admin GET "/api/v1/features/$F" | json 'd["status"]'); [[ $st == handed_off ]] && ok "feature is handed off" || die "status $st"
-call admin PUT "/api/v1/features/$F/gates/product/document" '{"content":"# x\n"}' >/dev/null; expect 409 "handed-off feature is read-only"
-FIX=$(call admin POST /api/v1/features "{\"title\":\"Refund fix\",\"parent\":\"$F\"}" | json 'd["uniqueId"]'); expect 201 "fix feature $FIX"
-call admin GET "/api/v1/features/$FIX/gates/product/document" | json 'd["content"]' | grep -q "parent: $F" && ok "fix document has front matter parent: $F" || die "fix front matter"
-call admin DELETE "/api/v1/features/$FIX" '{"confirmUniqueId":"WRONG"}' >/dev/null; expect 422 "delete needs the ID typed"
-call admin DELETE "/api/v1/features/$FIX" "{\"confirmUniqueId\":\"$FIX\"}" >/dev/null; expect 204 "fix feature deleted"
-call admin GET "/api/v1/features/$FIX" >/dev/null; expect 410 "deleted feature answers 410"
-N=$(call admin POST /api/v1/features '{"domain":"FMS","system":"CAR","title":"Next"}' | json 'd["uniqueId"]'); [[ $N == FMS.CAR-0003 ]] && ok "number of a deleted feature is not reused ($N)" || die "got $N"
-
-echo "Agent (ACP + MCP)"
-curl -s -N -b "$TMP/admin" --max-time 20 "$WEB/api/v1/events" > "$TMP/sse" &
+echo "Research: issue and Discovery (R1–R7)"
+curl -s -N -b "$TMP/anna" --max-time 600 "$WEB/api/v1/events" > "$TMP/sse" &
 SSE=$!
-sleep 1
-call admin POST /api/v1/chat/messages '{"text":"hello agent","mode":"general"}' >/dev/null; expect 202 "general question accepted"
-wait_for "answer streamed over SSE (agent.token → agent.done)" grep -q "agent.done" "$TMP/sse"
-grep -q '"text":"echo: hello' "$TMP/sse" && ok "tokens streamed" || die "tokens"
-call admin POST /api/v1/chat/messages "{\"text\":\"edit product: # Next\\n\\nWritten by the agent.\",\"mode\":\"spec\",\"feature\":\"$N\",\"area\":\"product\"}" >/dev/null; expect 202 "spec-mode request accepted"
-agent_edit() { call admin GET "/api/v1/features/$N/gates/product/history" | grep -q '"isAgent":true'; }
-wait_for "agent edited the gate through MCP edit_spec (Hammurapi-Agent trailer)" agent_edit
-call admin POST /api/v1/chat/messages "{\"text\":\"edit product: # nope\",\"mode\":\"general\"}" >/dev/null
-sleep 2
-grep -q "not available in general mode" "$TMP/sse" && ok "edit_spec refused in general mode" || die "general-mode edit"
+call anna POST /api/v1/issues '{"type":"idea","domain":"FMS","title":"Weekend tariffs","description":"Customers ask for weekend tariffs."}' >/dev/null; expect 201 "issue created by a reader"
+ISS=$(cat "$TMP/body" | json 'd["key"]'); [[ $ISS == ISS.FMS-0001 ]] && ok "key $ISS" || die "key $ISS"
+verified() { [[ $(field anna GET "/api/v1/issues/$ISS" 'd["status"]') == verification ]]; }
+wait_for "Discovery by the agent → verification (DSC-01)" verified
+[[ $(field anna GET "/api/v1/issues/$ISS/discovery" 'd["complete"]') == True ]] && ok "Discovery has value and measure" || die "discovery incomplete"
+call anna POST "/api/v1/issues/$ISS/reject" '{"reason":""}' >/dev/null; expect 422 "reject needs a reason (DSC-05)"
+F=$(call anna POST "/api/v1/issues/$ISS/accept" '{"system":"CAR"}' | json 'd["featureKey"]'); expect 201 "issue accepted → feature $F (DSC-09)"
+[[ $F == FTR.FMS.CAR-0001 ]] || die "feature key $F"
+[[ $(field anna GET "/api/v1/issues/$ISS" 'd["status"]') == accepted ]] && ok "issue accepted" || die "issue status"
+field anna GET "/api/v1/features/$F/gates/product/document" 'd["content"]' | grep -q "sum(hammurapi_demo_value)" && ok "success metric in the product draft" || die "metric not in product spec"
+call anna POST /api/v1/features '{"domain":"FMS","system":"CAR","title":"x"}' >/dev/null; [[ $(status) == 405 || $(status) == 404 ]] && ok "no direct feature creation (DSC-13)" || die "direct creation $(status)"
+
+echo "Specification: gates, generated tech/qa (R12–R15)"
+doc=$(call anna GET "/api/v1/features/$F/gates/product/document"); sha=$(echo "$doc" | json 'd["sha"]')
+call anna PUT "/api/v1/features/$F/gates/product/document" "{\"content\":\"# Weekend tariffs\\n\\n## Requirements\\n\\n**R1.** Weekend tariff in booking.\\n- Given a weekend day, when a car is booked, then the weekend tariff applies.\\n\\n**R2.** Price calculation.\\n- Given the weekend tariff, when the price is shown, then it uses the tariff.\\n\",\"baseSha\":\"$sha\"}" >/dev/null; expect 200 "product document saved"
+call anna DELETE "/api/v1/features/$F/lock" >/dev/null
+call oleg PUT "/api/v1/features/$F/gates/tech/document" '{"content":"# x\n"}' >/dev/null; expect 403 "tech is not edited by hand (GEN-03)"
+reqs() { [[ $(field anna GET "/api/v1/features/$F/requirements" 'len(d)') == 2 ]]; }
+wait_for "requirements R1, R2 projected from the product spec (GEN-05)" reqs
+call anna POST "/api/v1/features/$F/gates/product/submit" >/dev/null; expect 200 "product submitted"
+call oleg POST "/api/v1/features/$F/gates/product/approve" >/dev/null; expect 403 "technical expert cannot approve product (GEN-09)"
+call anna POST "/api/v1/features/$F/gates/product/approve" >/dev/null; expect 200 "product approved by the product expert"
+generated() { [[ $(field anna GET "/api/v1/features/$F" 'len(d["pendingGates"])') == 0 ]]; }
+wait_for "tech and qa generated by the agent (GEN-01)" generated
+field anna GET "/api/v1/features/$F/gates/tech/document" 'd["content"]' | grep -q "| booking |" && ok "tech has the service table" || die "tech table"
+svcs() { [[ $(field anna GET "/api/v1/features/$F" 'len(d["services"])') == 2 ]]; }
+wait_for "affected services projected from tech" svcs
+call anna POST "/api/v1/features/$F/codegen" >/dev/null; expect 409 "codegen before approval (CG-01)"
+for a in tech qa; do
+  call oleg POST "/api/v1/features/$F/gates/$a/submit" >/dev/null; expect 200 "$a submitted"
+  call oleg POST "/api/v1/features/$F/gates/$a/approve" >/dev/null; expect 200 "$a approved by a technical expert"
+done
+
+echo "Code generation (R16–R21, runner with the local executor)"
+n=$(call anna POST "/api/v1/features/$F/codegen" | json 'len(d["services"])'); expect 202 "code generation started"
+[[ $n == 2 ]] && ok "plan: 2 services" || die "plan $n"
+call anna PUT "/api/v1/features/$F/gates/product/document" '{"content":"# x\n"}' >/dev/null; expect 409 "specifications read-only during codegen"
+validation() { [[ $(field anna GET "/api/v1/features/$F" 'd["phase"]') == validation ]]; }
+wait_for "agent PRs in both services → phase Validation (CG-11)" validation
+impl=$(call anna GET "/api/v1/features/$F/implementation")
+echo "$impl" | json 'all(s["pr"] and s["pr"]["byAgent"] for s in d["services"])' | grep -q True && ok "PRs from the bot in each service (CG-04)" || die "PRs $impl"
+echo "$impl" | json '[s["pr"]["state"] for s in d["services"]]' | grep -q merged && die "a PR was merged during development" || ok "nothing merged during development (R17)"
+echo "$impl" | json 'sum(len(r["prs"]) for r in d["matrix"])' | grep -qE '^[1-9]' && ok "matrix requirement → test case → PR (R21)" || die "matrix"
+
+echo "Validation (R22–R25)"
+ready() { [[ $(field anna GET "/api/v1/features/$F/validation" 'd["state"]') == awaiting_signatures ]]; }
+wait_for "CI results of the PR branches received (fake CI → /hooks/v1/ci-results)" ready
+field anna GET "/api/v1/features/$F/validation" '[t["status"] for t in d["tests"]]' | grep -q passed && ok "test cases linked to CI results (VAL-01)" || die "tests"
+call oleg POST "/api/v1/features/$F/validation/sign" '{"side":"product"}' >/dev/null; expect 403 "technical expert cannot sign the product side (VAL-07)"
+call anna POST "/api/v1/features/$F/validation/sign" '{"side":"product"}' >/dev/null; expect 200 "product side signed"
+R=$(call oleg POST "/api/v1/features/$F/validation/sign" '{"side":"technical"}' | json 'd["releaseKey"]'); expect 200 "technical side signed"
+[[ $R == RLS.FMS.CAR-0001 ]] && ok "second signature created release $R (VAL-12)" || die "release $R"
+
+echo "Release (R26–R28, R31)"
+rel=$(call anna GET "/api/v1/releases/$R")
+[[ $(echo "$rel" | json 'd["step"]') == awaiting_start ]] && ok "release waits for the merge start" || die "step"
+[[ $(echo "$rel" | json 'd["prs"][-1]["kind"]') == spec ]] && ok "spec PR is the last one (REL-01)" || die "spec PR last"
+call anna PUT "/api/v1/releases/$R/plan" '{"order":["pricing","booking"]}' >/dev/null; expect 204 "plan reordered before the merge (REL-02)"
+call anna POST "/api/v1/releases/$R/merge" >/dev/null; expect 202 "merge started"
+for s in pricing booking; do
+  deploying() { [[ $(field anna GET "/api/v1/releases/$R" 'd["currentService"]') == "$s" && $(field anna GET "/api/v1/releases/$R" 'd["status"]') == deploying ]]; }
+  wait_for "$s merged, waiting for its release" deploying
+  call oleg POST "/api/v1/releases/$R/deploys/$s/mark" '{"version":"v1"}' >/dev/null; expect 202 "$s marked released by a technical expert (REL-10)"
+done
+confirmable() { [[ $(field anna GET "/api/v1/releases/$R" 'd["status"]') == awaiting_confirmation ]]; }
+wait_for "release awaits confirmation (no flags, no metric window in the first release)" confirmable
+call anna POST "/api/v1/releases/$R/confirm" >/dev/null; expect 202 "release confirmed"
+succeeded() { [[ $(field anna GET "/api/v1/releases/$R" 'd["status"]') == succeeded ]]; }
+wait_for "spec PR merged, release succeeded (REL-16)" succeeded
+[[ $(field anna GET "/api/v1/features/$F" 'd["phase"]') == released ]] && ok "feature released" || die "feature phase"
+[[ $(field anna GET "/api/v1/issues/$ISS" 'd["status"]') == resolved ]] && ok "issue resolved" || die "issue status"
+call anna POST "/api/v1/releases/$R/rollback" '{"reason":"late"}' >/dev/null; expect 409 "a succeeded release cannot be rolled back (REL-19)"
+
+echo "Deploy pipeline and rollback (R32–R34, R40)"
+secret=$(call admin PUT /admin/api/v1/deploy/production '{"type":"webhook","url":"http://fakegitlab:8929/fake/deploy","auth":"secret","params":{"service":"{service}"},"timeoutMinutes":10}' | json 'd["secret"]'); expect 200 "production deploy configured (webhook)"
+curl -s -X POST -H 'Content-Type: application/json' -d "{\"deploySecret\":\"$secret\"}" "$GITLAB/fake/config" >/dev/null && ok "deploy target knows the result secret"
+call admin POST /admin/api/v1/deploy/production/test '{"service":"booking"}' | grep -q '"ok":true' && ok "dry run of the pipeline (DEP-06)" || die "deploy test"
+call anna POST /api/v1/issues '{"type":"problem","domain":"FMS","title":"Refunds","description":"Refund flow."}' >/dev/null
+ISS2=$(cat "$TMP/body" | json 'd["key"]')
+v2() { [[ $(field anna GET "/api/v1/issues/$ISS2" 'd["status"]') == verification ]]; }
+wait_for "second issue $ISS2 through Discovery" v2
+F2=$(call anna POST "/api/v1/issues/$ISS2/accept" '{"noFeature":true,"system":"CAR"}' | json 'd["featureKey"]'); expect 201 "Problem without a feature → new feature $F2 (DSC-11)"
+[[ $(field anna GET "/api/v1/features/$F2" 'd["isProblem"]') == True ]] && ok "feature marked Problem" || die "isProblem"
+sha=$(field anna GET "/api/v1/features/$F2/gates/product/document" 'd["sha"]')
+call anna PUT "/api/v1/features/$F2/gates/product/document" "{\"content\":\"# Refunds\\n\\n**R1.** Refund in booking.\\n- Given a paid booking, when it is cancelled, then money returns.\\n\",\"baseSha\":\"$sha\"}" >/dev/null
+call anna DELETE "/api/v1/features/$F2/lock" >/dev/null
+call anna POST "/api/v1/features/$F2/gates/product/submit" >/dev/null
+call anna POST "/api/v1/features/$F2/gates/product/approve" >/dev/null; expect 200 "product of $F2 approved"
+g2() { [[ $(field anna GET "/api/v1/features/$F2" 'len(d["pendingGates"])') == 0 ]]; }
+wait_for "tech and qa generated" g2
+for a in tech qa; do call oleg POST "/api/v1/features/$F2/gates/$a/submit" >/dev/null; call oleg POST "/api/v1/features/$F2/gates/$a/approve" >/dev/null; done
+call anna POST "/api/v1/features/$F2/codegen" >/dev/null; expect 202 "code generation of $F2"
+val2() { [[ $(field anna GET "/api/v1/features/$F2/validation" 'd["state"]') == awaiting_signatures ]]; }
+wait_for "$F2 in validation with CI results" val2
+call anna POST "/api/v1/features/$F2/validation/sign" '{"side":"product"}' >/dev/null
+R2=$(call anna POST "/api/v1/features/$F2/validation/sign" '{"side":"technical"}' | json 'd["releaseKey"]'); expect 200 "one expert of both kinds signs both sides (VAL-08) → $R2"
+call anna POST "/api/v1/releases/$R2/merge" >/dev/null; expect 202 "merge of $R2 started"
+released_one() { call anna GET "/api/v1/releases/$R2" | json '[x for x in d["deploys"] if x["status"]=="success" and x["signal"]=="pipeline"]' | grep -q pipeline; }
+wait_for "pipeline started with run_id, result webhook counted the release (REL-06, REL-07)" released_one
+call anna POST "/api/v1/releases/$R2/rollback" '{"reason":""}' >/dev/null; expect 422 "rollback needs a reason (RB-01)"
+call anna POST "/api/v1/releases/$R2/rollback" '{"reason":"refund errors grow"}' >/dev/null; expect 202 "rollback started"
+rolled() { [[ $(field anna GET "/api/v1/releases/$R2" 'd["status"]') == rolled_back ]]; }
+wait_for "revert PRs by the bot, merged, redeployed; spec PR closed (RB-02…RB-05)" rolled
+[[ $(field anna GET "/api/v1/features/$F2" 'd["phase"]') == rolled_back ]] && ok "feature rolled back" || die "feature phase"
+call anna GET "/api/v1/issues/$ISS2" | json 'd["rolledBackRelease"]' | grep -q "$R2" && ok "issue returned with a link to the release (RB-06)" || die "issue link"
+field anna GET "/api/v1/releases/$R2" '[p["kind"] for p in d["prs"]]' | grep -q revert && ok "revert PRs recorded in the release" || die "revert PRs"
+
+echo "General section (R37) and chat"
+field anna GET /api/v1/focus 'len(d["research"])' | grep -qE '^[0-9]+$' && ok "In focus answers by stage" || die "focus"
+field anna GET "/api/v1/overview?domain=all" 'len(d["issues"]) + len(d["features"]) + len(d["releases"])' | grep -qE '^[0-9]+$' && ok "Overview in three columns" || die "overview"
+call anna POST /api/v1/chat/messages '{"text":"hello agent","mode":"general"}' >/dev/null; expect 202 "chat question accepted"
+wait_for "answer streamed over SSE" grep -q "agent.done" "$TMP/sse"
+grep -q "issue.updated" "$TMP/sse" && ok "issue.updated events over SSE" || die "sse issue.updated"
+grep -q "release.updated" "$TMP/sse" && ok "release.updated events over SSE" || die "sse release.updated"
 kill $SSE 2>/dev/null || true; wait $SSE 2>/dev/null || true
-h=$(call admin GET /api/v1/chat/history | json 'len(d["items"])'); [[ $h -ge 4 ]] && ok "chat history is stored ($h messages)" || die "history $h"
 
-echo "Import from archive"
-"$PY" - "$TMP/import.zip" <<'PY'
-import sys, zipfile
-z = zipfile.ZipFile(sys.argv[1], "w")
-for area in ["product", "design", "arch"]:
-    z.writestr(f"specs/PLT/HMR/PLT.HMR-0001/{area}/spec.md", f"# Hammurapi {area}\n\nSee PLT.HMR-0001.\n")
-z.writestr("specs/LOG/DLV/LOG.DLV-0003/product/spec.md", "# Keys by courier\n")
-z.writestr("rules/product/template.md", "# Product: <feature title>\n\n## Problem\n\n## Risks\n")
-z.close()
-PY
-job=$(curl -s -b "$TMP/admin" -H "X-CSRF-Token: $(csrf admin)" -F "file=@$TMP/import.zip" "$WEB/api/v1/imports")
-JOB=$(echo "$job" | json 'd["id"]'); ok "archive uploaded, preview created"
-echo "$job" | json '[f["newId"] for f in d["features"]]' | grep -q "PLT.HMR-0001" && ok "preview shows the new ID" || die "preview: $job"
-echo "$job" | grep -q unknown_domain && ok "unknown domain LOG reported for its feature only" || die "unknown domain"
-echo "$job" | grep -q old_id_mentioned && ok "old ID mentions reported" || die "old id"
-call admin POST "/api/v1/imports/$JOB/confirm" >/dev/null; expect 200 "import confirmed"
-import_done() { call admin GET "/api/v1/imports/$JOB" | grep -q '"status":"done"'; }
-wait_for "worker executed the import" import_done
-g=$(call admin GET /api/v1/features/PLT.HMR-0001 | json 'len(d["gates"])'); [[ $g == 3 ]] && ok "imported feature has 3 gates" || die "gates $g"
-call admin GET /api/v1/features/PLT.HMR-0001 | json 'd["permissions"]["handoff"]' | grep -q True && ok "domain without approval: hand-off available at once" || die "handoff perm"
-
-echo "Rules (four eyes)"
-rules=$(call admin GET /admin/api/v1/rules/product); expect 200 "rules readable"
-rsha=$(echo "$rules" | json '[f["sha"] for f in d["files"] if f["file"]=="template"][0]')
-# The import above (admin is admin of product) already proposed a template change.
-open=$(call admin GET "/admin/api/v1/rules/changes?area=product&status=open" | json 'len(d["items"])'); [[ $open == 1 ]] && ok "import proposed a rules change" || die "open changes $open"
-CH=$(call admin GET "/admin/api/v1/rules/changes?area=product&status=open" | json 'd["items"][0]["id"]')
-call admin POST "/admin/api/v1/rules/product/changes" "{\"file\":\"template\",\"content\":\"# x\\n\",\"baseSha\":\"$rsha\"}" >/dev/null; expect 409 "one open change per file"
-call admin POST "/admin/api/v1/rules/changes/$CH/approve" >/dev/null; expect 403 "author cannot approve own change"
-call anna POST "/admin/api/v1/rules/changes/$CH/approve" >/dev/null; expect 200 "another product admin approves and merges"
-call admin GET /admin/api/v1/rules/product | grep -q "Risks" && ok "new template is active on the default branch" || die "rules not merged"
-
-echo "Misc"
-url=$(call anna POST /api/v1/feedback '{"text":"Great tool"}' | json 'd["url"]'); expect 201 "feedback → issue $url"
-call admin GET /api/v1/features?domain=mine | json 'len(d["items"])' | grep -qE '^[1-9]' && ok "'Mine' filter follows profile domains" || die "mine filter"
-metrics=$(curl -s "${API_SERVICE:-http://localhost:9100}/metrics"); grep -q hammurapi_gate_transitions_total <<<"$metrics" && ok "Prometheus metrics exported" || die "metrics"
+echo "Observability"
+metrics=$(curl -s "$API_SERVICE/metrics"); grep -q hammurapi_gate_transitions_total <<<"$metrics" && ok "api metrics exported" || die "metrics"
+wm=$(curl -s "${WORKER_SERVICE:-http://localhost:9101}/metrics")
+grep -q hammurapi_workflow_transition_duration_seconds <<<"$wm" && grep -q hammurapi_runner_tasks <<<"$wm" && ok "workflow and runner metrics exported (OPS-03)" || die "worker metrics"
 
 printf '\n\033[32m%d checks passed\033[0m\n' "$pass"

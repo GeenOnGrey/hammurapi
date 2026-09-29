@@ -29,6 +29,11 @@ app.kubernetes.io/component: {{ .component }}
 {{ printf "%s:%s" $img.repository ($img.tag | default .Chart.AppVersion) }}
 {{- end }}
 
+{{- define "hammurapi.runnerImage" -}}
+{{- $img := mergeOverwrite (deepCopy .Values.image) .Values.runner.image -}}
+{{ printf "%s:%s" $img.repository ($img.tag | default .Chart.AppVersion) }}
+{{- end }}
+
 {{- define "hammurapi.envFrom" -}}
 envFrom:
   - configMapRef: { name: {{ include "hammurapi.fullname" . }} }

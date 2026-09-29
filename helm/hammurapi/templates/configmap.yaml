@@ -7,3 +7,10 @@ data:
   {{- range $k, $v := .Values.config }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}
+  # Derived from the chart: internal API (runners, MCP) and the runner executor.
+  INTERNAL_ADDR: ":8081"
+  INTERNAL_URL: {{ printf "http://%s-api.%s.svc:8081" (include "hammurapi.fullname" .) .Release.Namespace | quote }}
+  RUNNER_EXECUTOR: {{ .Values.runner.executor | quote }}
+  RUNNER_NAMESPACE: {{ .Values.runner.namespace | quote }}
+  RUNNER_IMAGE: {{ include "hammurapi.runnerImage" . | quote }}
+  RUNNER_AGENT_SECRET: {{ .Values.runner.agentSecret | quote }}

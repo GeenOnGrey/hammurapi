@@ -1,8 +1,16 @@
 # Technical specification: <feature title>
 
+## Changes by service
+
+One row per service; code generation starts one task per row.
+
+| Service | Repository | What changes | Requirements |
+| --- | --- | --- | --- |
+| `booking` | `org/booking-svc` | <short summary> | R1, R2 |
+
 ## API
 
-Endpoints, request and response shapes, error codes.
+Endpoints, request and response shapes, error codes, permissions.
 
 ## Data model
 

@@ -10,9 +10,15 @@ Who suffers, how it shows up, and what evidence confirms it.
 
 Who uses the feature and with which permissions.
 
-## Scenarios and requirements
+## Requirements
 
-Key scenarios, step by step. Numbered requirements are easier to reference.
+Every requirement has an ID `R<n>` (globally `<feature key>-R<n>`, e.g. `FTR.FMS.CAR-0005-R3`) and
+acceptance criteria. Tests, code and PRs refer to these IDs.
+
+**R1.** <Requirement>
+
+- Acceptance criteria:
+  - Given <condition>, when <action>, then <result>.
 
 ## Scope
 
@@ -22,7 +28,9 @@ Key scenarios, step by step. Numbered requirements are easier to reference.
 
 ## Success metrics
 
-How we will know the feature worked.
+| Metric | Source | Query | Target | Evaluation window |
+| --- | --- | --- | --- | --- |
+| <name> | Prometheus / ClickHouse | <query> | <value> | <e.g. 4 weeks after the release> |
 
 ## Decisions
 

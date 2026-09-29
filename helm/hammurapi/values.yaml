@@ -1,10 +1,10 @@
-# Instance image = Hammurapi + ACP agent (see Dockerfile.instance). Used by api.
-image: { repository: registry.example.com/hammurapi, tag: "1.0.0", pullPolicy: IfNotPresent }
-# worker, cleaner and migrate do not need the agent; defaults to `image`.
+# Instance image = Hammurapi + ACP agent (see Dockerfile.instance). Used by api, worker and runner Jobs.
+image: { repository: registry.example.com/hammurapi, tag: "1.1.0", pullPolicy: IfNotPresent }
+# cleaner and migrate do not need the agent; defaults to `image`.
 coreImage: {}
 web:
   enabled: true
-  image: { repository: registry.example.com/hammurapi-web, tag: "1.0.0", pullPolicy: IfNotPresent }
+  image: { repository: registry.example.com/hammurapi-web, tag: "1.1.0", pullPolicy: IfNotPresent }
   replicas: 2
   resources: { requests: { cpu: 50m, memory: 64Mi } }
 
@@ -17,7 +17,26 @@ api:
   extraEnv: []
 worker:
   replicas: 1
-  resources: { requests: { cpu: 100m, memory: 128Mi } }
+  # The worker runs one-off agent sessions (Discovery, gate generation, checks).
+  resources: { requests: { cpu: 200m, memory: 512Mi } }
+runner:
+  # k8s: one Job per code task in `namespace`; local: subprocesses of the worker (demo only).
+  executor: k8s
+  namespace: hammurapi-runners
+  createNamespace: true
+  # Runner image; defaults to `image` (it needs the agent).
+  image: {}
+  # Secret in the runner namespace with the agent credentials (e.g. ANTHROPIC_API_KEY), passed as envFrom.
+  agentSecret: hammurapi-runner-agent
+  networkPolicy:
+    enabled: true
+    # Extra egress of runner pods: git provider API and LLM API. Add the CIDR of a
+    # self-hosted GitLab here if it lives in a private network.
+    egress:
+      - to:
+          - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
+        ports:
+          - { port: 443, protocol: TCP }
 cleaner:
   schedule: "0 3 * * *"
   resources: { requests: { cpu: 50m, memory: 64Mi } }
@@ -51,6 +70,19 @@ config:
   GIT_REPO: product/specs
   GIT_DEFAULT_BRANCH: main
   BOOTSTRAP_ADMINS: ""
+  # Login of the bot account (GitLab) / GitHub App slug + [bot]; its commits and reviews are not the users'.
+  HAMMURAPI_BOT_LOGIN: hammurapi-bot
+  # Base URL of /hooks/v1/* given to CI and deploy systems; defaults to PUBLIC_URL.
+  HOOKS_URL: ""
+  RUNNER_TIMEOUT: 2h
+  RUNNER_TOKEN_LIMIT: "3000000"
+  RUNNER_MAX_PARALLEL: "10"
+  RUNNER_MAX_PARALLEL_PER_REPO: "1"
+  RUNNER_CPU: "2"
+  RUNNER_MEMORY: 4Gi
+  WORKFLOW_MAX_ATTEMPTS: "8"
+  WORKFLOW_LEASE: 2m
+  DISCOVERY_TIMEOUT: 20m
   ACP_AGENT_COMMAND: claude-agent-acp
   ACP_AGENT_ARGS: ""
   ACP_MAX_PROCESSES: "4"
@@ -78,6 +110,8 @@ secrets: {}
   # GITLAB_CLIENT_ID / GITLAB_CLIENT_SECRET or GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
   # S3_ACCESS_KEY / S3_SECRET_KEY
   # ACP_AGENT_ENV: ANTHROPIC_API_KEY=…
+  # GITLAB_BOT_TOKEN: …            (GitLab: token of the bot account; GitHub uses the App)
+  # CI_RESULTS_SECRET: …           (HMAC of /hooks/v1/ci-results; two comma-separated values while rotating)
 
 serviceMonitor:
   enabled: false

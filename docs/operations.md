@@ -20,7 +20,12 @@ Service port `:9100` of `api` and `worker` (no authentication, keep it off the p
 | `hammurapi_webhook_events_total{result}` | `accepted`, `processed`, `unauthorized` (wrong secret), `error` |
 | `hammurapi_kafka_consumer_lag{topic}` | Worker falling behind |
 | `hammurapi_agent_sessions_active`, `hammurapi_agent_processes_up` | Agent pool |
-| `hammurapi_gate_transitions_total{area,to}` | Workflow throughput, resets to draft |
+| `hammurapi_gate_transitions_total{area,to}` | Gate throughput, resets to draft |
+| `hammurapi_workflow_runs{kind,state}` | Active runs of Discovery, gate generation, codegen, validation, release, rollback |
+| `hammurapi_workflow_blocked_total{kind,reason}` | Runs that exhausted their attempts — each one waits for a human on the General page |
+| `hammurapi_workflow_transition_duration_seconds{kind,step}` | Slow steps |
+| `hammurapi_runner_tasks{type,status}`, `hammurapi_runner_task_duration_seconds`, `hammurapi_runner_tokens_total{type}` | Agent tasks, their duration and LLM token use |
+| `hammurapi_deploy_runs_total{environment,status}`, `hammurapi_release_rollbacks_total` | Deploys and rollbacks |
 
 ## Logs and traces
 
@@ -56,7 +61,14 @@ git.
 - Webhooks without a valid secret are rejected with 401 and never reach Kafka.
 - Attachments and archive files are checked by content, not extension. Archives are read in memory
   with limits on size, unpacked size and file count; `..`, absolute paths and symlinks are rejected.
-- The MCP endpoint listens on loopback only; tokens are per session and revoked when it closes.
+- The internal API (`:8081`: MCP and runner tasks) is never routed through the ingress. MCP grants
+  are per session and revoked when it closes; task tokens (`hmt_…`, stored as SHA-256) are valid
+  only while their task runs, and the git token a task receives is limited to its repository.
+- Runner Jobs run without a service account token, as a non-root user with a read-only root
+  filesystem, a deadline and a NetworkPolicy. The worker's service account may only manage Jobs in
+  the runner namespace.
+- CI results, deploy and feature-flag webhooks need an HMAC signature with a timestamp at most five
+  minutes old; secrets are shown once and rotated with two active at a time.
 
 ## Troubleshooting
 
@@ -65,6 +77,10 @@ git.
 | "The document changed, reload the page" on every approval | Webhooks do not arrive: check the provider's delivery log, `WEBHOOK_SECRET`, and `hammurapi_webhook_events_total` |
 | Edits do not reset statuses | Same as above, or the worker is down / lagging |
 | "Git provider session expired, sign in again" | The refresh token was revoked or `TOKEN_ENCRYPTION_KEY` changed |
-| Chat says the agent is not configured | `ACP_AGENT_COMMAND` is empty or not in the `api` image |
-| Hand-off fails with the provider's reason | Branch protection, required checks or merge conflicts on the PR/MR |
+| Chat says the agent is not configured | `ACP_AGENT_COMMAND` is empty or not in the instance image |
+| Discovery or gate generation stays "the agent is working" | The worker cannot start the agent (instance image, `ACP_AGENT_ENV`), or `DISCOVERY_TIMEOUT` is too short; see the run's last error on the issue |
+| A code task fails at once | Jobs cannot be created (RBAC, namespace, `RUNNER_IMAGE`), or the runner cannot reach `INTERNAL_URL` (NetworkPolicy) |
+| Validation waits for CI forever | The CI step does not post to `/hooks/v1/ci-results`, the signature is wrong (401 in the CI log), or test names do not contain the QA test case IDs |
+| A release is blocked on merge | Branch protection, required checks or merge conflicts — the reason is on the release; fix it and retry, or roll back |
+| A release waits for a deploy | The deploy job does not call `/hooks/v1/deploy` with the `runId`; mark the deploy by hand on the release |
 | Voice input says recognition is unavailable | `WHISPER_URL` not set or the Whisper service is not running |

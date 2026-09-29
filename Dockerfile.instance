@@ -1,6 +1,7 @@
 # Instance image = Hammurapi image + an ACP agent (arch spec §19).
-# The agent runs as a subprocess of `hammurapi api` and must live in the same
-# container. Pick a target:
+# The agent runs as a subprocess of `hammurapi api` (chat), `hammurapi worker`
+# (Discovery, gate generation, checks) and `hammurapi runner` (code tasks), so all
+# three use this image. Pick a target:
 #
 #   fake    scripted test agent shipped with Hammurapi (no LLM; for smoke tests)
 #   claude  Claude Code through its ACP adapter (needs Node.js and ANTHROPIC_API_KEY)
@@ -21,7 +22,9 @@ FROM node:24-slim AS claude
 ARG ACP_ADAPTER=@agentclientprotocol/claude-agent-acp
 RUN npm install -g "${ACP_ADAPTER}" && npm cache clean --force
 COPY --from=hammurapi /usr/local/bin/hammurapi /usr/local/bin/hammurapi
-USER node
+RUN mkdir -p /var/lib/hammurapi/runs && chown 1000:1000 /var/lib/hammurapi/runs
+# Numeric user (node): Kubernetes checks runAsNonRoot only for numeric users.
+USER 1000:1000
 WORKDIR /home/node
 EXPOSE 8080 9100
 ENTRYPOINT ["/usr/local/bin/hammurapi"]

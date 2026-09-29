@@ -3,7 +3,8 @@
 Every setting of a Hammurapi instance is an environment variable. Secrets come from a Kubernetes
 Secret (Helm) or from `.env` (Docker Compose). Empty values mean "use the default".
 
-`api`, `worker` and `cleaner` read the same variables; `migrate` only needs `DATABASE_URL`.
+`api`, `worker` and `cleaner` read the same variables; `migrate` only needs `DATABASE_URL`; a runner
+task gets its settings from the worker (`HAMMURAPI_TASK_TOKEN`, `HAMMURAPI_INTERNAL_URL`, `ACP_*`).
 
 ## URLs and listeners
 
@@ -12,7 +13,10 @@ Secret (Helm) or from `.env` (Docker Compose). Empty values mean "use the defaul
 | `PUBLIC_URL` | URL people open. Used for the OAuth callback (`<PUBLIC_URL>/api/v1/auth/callback`); `https://` turns on `Secure` cookies | `http://localhost:8080` |
 | `HTTP_ADDR` | User API, admin API and webhooks | `:8080` |
 | `SERVICE_ADDR` | `/healthz`, `/readyz`, `/metrics` (no authentication — keep it internal) | `:9100` |
-| `MCP_ADDR` | Internal MCP endpoint the agent calls; must stay on loopback | `127.0.0.1:8081` |
+| `INTERNAL_ADDR` | Internal API: `/mcp` for chat agents, `/internal/v1/…` for runner tasks (task token). Reachable from runners, never through the ingress. `MCP_ADDR` is the old name | `:8081` |
+| `INTERNAL_URL` | URL of the internal API as seen from runners | `http://localhost:<INTERNAL_ADDR port>` |
+| `WORKER_MCP_ADDR` | MCP endpoint of the worker's one-off agent sessions (Discovery, gate generation, checks); loopback only | `127.0.0.1:8083` |
+| `HOOKS_URL` | Base URL of `/hooks/v1/*` given to deploy systems as the callback | `PUBLIC_URL` |
 
 ## Git provider
 
@@ -28,9 +32,33 @@ One provider and one repository per instance.
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | GitHub App identity | — |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub App OAuth credentials (user-to-server tokens) | — (required for GitHub) |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | GitLab OAuth application | — (required for GitLab) |
-| `WEBHOOK_SECRET` | Shared with the repository webhook. GitLab sends it as `X-Gitlab-Token`; GitHub signs with it (`X-Hub-Signature-256`) | — (required for `api`) |
+| `WEBHOOK_SECRET` | Shared with the webhooks of the spec, service and catalog repositories. GitLab sends it as `X-Gitlab-Token`; GitHub signs with it (`X-Hub-Signature-256`) | — (required for `api`) |
+| `GITLAB_BOT_TOKEN` | GitLab: token of the bot account that commits, merges and triggers pipelines (GitHub uses the App) | — |
+| `HAMMURAPI_BOT_LOGIN` | Login of the bot (`<app-slug>[bot]` on GitHub); its commits and reviews are not counted as human | — |
 
-See [git-providers.md](git-providers.md).
+See [git-providers.md](git-providers.md) and [cycle.md](cycle.md).
+
+## Development cycle
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CI_RESULTS_SECRET` | HMAC secret of `/hooks/v1/ci-results`; two comma-separated values while rotating | — (CI results are refused) |
+| `RUNNER_EXECUTOR` | `k8s` (a Job per code task) or `local` (subprocesses of the worker, demo only) | `k8s` |
+| `RUNNER_NAMESPACE` | Namespace of runner Jobs | `hammurapi-runners` |
+| `RUNNER_IMAGE` | Image of runner Jobs (the instance image, with the agent) | — (required for `k8s`) |
+| `RUNNER_AGENT_SECRET` | Secret in the runner namespace with the agent credentials, passed as `envFrom` | — |
+| `RUNNER_CPU`, `RUNNER_MEMORY` | Limits of a runner Job | `2`, `4Gi` |
+| `RUNNER_WORKDIR` | Working directories of `local` tasks | `/var/lib/hammurapi/runs` |
+| `RUNNER_TIMEOUT` | Maximum duration of a task (Job `activeDeadlineSeconds`) | `2h` |
+| `RUNNER_TOKEN_LIMIT` | Agent tokens per task; the task fails when exceeded | `3000000` |
+| `RUNNER_MAX_PARALLEL` | Tasks running at once per instance | `10` |
+| `RUNNER_MAX_PARALLEL_PER_REPO` | Tasks running at once per repository | `1` |
+| `WORKFLOW_MAX_ATTEMPTS` | Attempts of an effect (deploy, merge, agent call…) before the run is blocked | `8` |
+| `WORKFLOW_LEASE` | How long a worker holds a run before another may take it | `2m` |
+| `DISCOVERY_TIMEOUT` | Maximum duration of one Discovery session | `20m` |
+
+Deploy settings, the feature-flag webhook, the Backstage catalog, stage and metric sources are not
+environment variables: administrators set them in the web app (see [cycle.md](cycle.md)).
 
 ## Users
 
@@ -43,7 +71,7 @@ See [git-providers.md](git-providers.md).
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `ACP_AGENT_COMMAND` | Path of the agent binary inside the `api` container | — (chat is disabled when empty) |
+| `ACP_AGENT_COMMAND` | Path of the agent binary in the instance image (`api`, `worker`, runner) | — (the agent is disabled when empty) |
 | `ACP_AGENT_ARGS` | Arguments, space-separated | — |
 | `ACP_AGENT_ENV` | Extra environment of the agent, `KEY=VALUE;KEY=VALUE` (e.g. its LLM API key) | — |
 | `ACP_MAX_PROCESSES` | Maximum agent processes per `api` pod; sessions share processes beyond that | `4` |

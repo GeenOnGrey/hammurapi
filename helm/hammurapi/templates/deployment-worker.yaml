@@ -19,9 +19,15 @@ spec:
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if eq .Values.runner.executor "k8s" }}
+      serviceAccountName: {{ include "hammurapi.fullname" . }}-worker
+      {{- else }}
+      automountServiceAccountToken: false
+      {{- end }}
       containers:
         - name: worker
-          image: {{ include "hammurapi.coreImage" . }}
+          # Instance image: the worker runs agent sessions (Discovery, gates, checks).
+          image: {{ include "hammurapi.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["worker"]
           ports:

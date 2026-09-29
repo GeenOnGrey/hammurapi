@@ -28,6 +28,8 @@ spec:
           args: ["api"]
           ports:
             - { name: http, containerPort: 8080 }
+            # Internal API: runner tasks and MCP. Not exposed through the ingress.
+            - { name: internal, containerPort: 8081 }
             - { name: service, containerPort: 9100 }
           {{- include "hammurapi.envFrom" . | nindent 10 }}
           {{- with .Values.api.extraEnv }}

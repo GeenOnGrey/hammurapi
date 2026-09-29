@@ -19,9 +19,16 @@ docker compose --profile demo up -d --build
 ```
 
 The `demo` profile adds **fakegitlab** (`hammurapi-core/cmd/fakegitlab`): an in-memory imitation of
-the GitLab endpoints Hammurapi uses — OAuth, branches, files, multi-file commits, merge requests,
-issues, search — which also sends real push webhooks to `api`. Its sign-in page lets you choose any
-login. `FAKE_REFUSE_MERGE=1` makes it refuse merges, to test provider refusals. Development only.
+the GitLab endpoints Hammurapi uses — OAuth, branches, files, multi-file commits, merge requests
+with a three-way merge, diffs, notes, tags, pipelines, issues, search — for the specification
+repository and the service repositories in `FAKE_SERVICE_REPOS` (`demo/booking`, `demo/pricing`).
+It sends real push, tag, merge request and note webhooks to `api`, simulates CI (a JUnit report
+with the `Test<ID>_…` tests of a branch, signed with `FAKE_CI_SECRET`), answers pipeline triggers
+with a deploy callback, and serves a Prometheus endpoint (`/fake/prometheus`) for metric sources.
+Its sign-in page lets you choose any login. `FAKE_REFUSE_MERGE=1` makes it refuse merges, to test
+provider refusals. Development only.
+
+Code tasks run with `RUNNER_EXECUTOR=local` in compose (subprocesses of the worker).
 
 The default agent in compose is **hammurapi-fakeagent** (`hammurapi-core/cmd/fakeagent`), a scripted
 ACP agent. To try a real agent, set `AGENT_TARGET=claude`, `ACP_AGENT_COMMAND=claude-agent-acp` and
@@ -43,8 +50,10 @@ names with `localhost` (`postgres`, `kafka`, `minio`), and start `hammurapi migr
 hosts file when running outside compose.
 
 Layout: vertical slices in `internal/features/*` (handlers, service, repository); adapters in
-`internal/platform/*`; the shared projection of features and gates in `internal/specdata`.
-External dependencies sit behind interfaces with generated mocks.
+`internal/platform/*`; the shared projection of features and gates in `internal/specdata`, and of
+issues, services, tasks and releases in `internal/cycledata`. Cycle steps are state machines on the
+workflow engine (`internal/features/workflows`): a slice registers its machine and its effects, the worker
+runs them. External dependencies sit behind interfaces with generated mocks.
 
 ## Frontend
 
@@ -65,9 +74,9 @@ stack on port 8080 or set `PUBLIC_URL=http://localhost:5173` for the api.
 | Level | Where | What |
 | --- | --- | --- |
 | Unit | `hammurapi-core` `go test ./...` | Services on mockgen mocks: roles per area, sequential approval, stale approval, locks, deletion rules, webhook projection and idempotency; ACP pool against the fake agent over stdio (streaming, crash recovery, process limit, refused fs access); MCP permissions; providers against `httptest`; archive parsing (zip bombs, traversal) |
-| Integration | `go test -tags integration ./...` | Every repository query on Postgres 16 in Docker; concurrent numbering; locks |
+| Integration | `go test -tags integration ./...` | Every repository query on Postgres 16 in Docker; concurrent numbering; locks; the workflow engine (leases, retries, blocking); the whole cycle from an issue to a release and a rollback with stubbed effects |
 | Frontend | `hammurapi-web` `npm test` | All five locales have the same keys and valid ICU; fallback to English; Russian plurals; `Intl` formatting |
-| End to end | `hammurapi/scripts/e2e-smoke.sh` | 64 checks through the web origin against the demo stack: sign-in, roles, dictionary, the full gate lifecycle through webhooks and the worker, fixes, deletion, agent edits via MCP, import, rules four-eyes, feedback, metrics |
+| End to end | `hammurapi/scripts/e2e-smoke.sh` | Through the web origin against the demo stack: an issue, Discovery by the fake agent, acceptance, human gates, generated tech/qa, code generation in the runner, CI results, signatures, a release (merge order, deploy marks, confirmation), a second release through a pipeline, and a rollback |
 
 ## Translations
 

@@ -68,6 +68,7 @@ if [[ $KEEP == 0 ]]; then
   }
   set_env TOKEN_ENCRYPTION_KEY "$(secret)"
   set_env WEBHOOK_SECRET "$(secret | tr -dc 'A-Za-z0-9' | head -c 32)"
+  set_env CI_RESULTS_SECRET "$(secret | tr -dc 'A-Za-z0-9' | head -c 32)"
 
   if [[ $DEMO == 1 ]]; then
     say "Demo mode: in-memory fake GitLab and a scripted agent (no real LLM)"
@@ -79,6 +80,8 @@ if [[ $KEEP == 0 ]]; then
     set_env GITLAB_CLIENT_ID demo
     set_env GITLAB_CLIENT_SECRET demo
     set_env BOOTSTRAP_ADMINS admin
+    set_env GITLAB_BOT_TOKEN "demo-bot-$(secret | tr -dc 'A-Za-z0-9' | head -c 12)"
+    set_env HOOKS_URL http://api:8080
   else
     ask PUBLIC_URL "Public URL of Hammurapi" "http://localhost:8080"
     ask PROVIDER "Git provider (github/gitlab)" "gitlab"
@@ -90,7 +93,9 @@ if [[ $KEEP == 0 ]]; then
     if [[ $PROVIDER == gitlab ]]; then
       ask GITLAB_CLIENT_ID "GitLab OAuth application ID" ""
       ask GITLAB_CLIENT_SECRET "GitLab OAuth application secret" ""
+      ask GITLAB_BOT_TOKEN "Token of the bot user (agent branches and MRs in service repositories)" ""
       set_env GITLAB_CLIENT_ID "$GITLAB_CLIENT_ID"; set_env GITLAB_CLIENT_SECRET "$GITLAB_CLIENT_SECRET"
+      set_env GITLAB_BOT_TOKEN "$GITLAB_BOT_TOKEN"
     else
       ask GITHUB_APP_ID "GitHub App ID" ""
       ask GITHUB_CLIENT_ID "GitHub App client ID" ""
@@ -131,7 +136,7 @@ done
 [[ ${ready:-0} == 1 ]] || die "the api is not ready; see: docker compose logs api"
 
 # shellcheck disable=SC1090
-source <(grep -E '^(PUBLIC_URL|WEBHOOK_SECRET|GIT_PROVIDER)=' "$ENV_FILE")
+source <(grep -E '^(PUBLIC_URL|WEBHOOK_SECRET|GIT_PROVIDER|CI_RESULTS_SECRET)=' "$ENV_FILE")
 cat <<EOF
 
 $(printf '\033[1;32m')Hammurapi is running.$(printf '\033[0m')
@@ -146,8 +151,9 @@ EOF
 else
   cat <<EOF
   OAuth callback:  $PUBLIC_URL/api/v1/auth/callback   (register it in your $GIT_PROVIDER app)
-  Webhook URL:     $PUBLIC_URL/hooks/v1/git   (push events)
+  Webhook URL:     $PUBLIC_URL/hooks/v1/git   (push, tag, MR and note events of the organization or group)
   Webhook secret:  $WEBHOOK_SECRET
+  CI results:      $PUBLIC_URL/hooks/v1/ci-results  signed with CI_RESULTS_SECRET (see docs/ci-results.md)
   The repository needs rules/<area>/template.md and fix-template.md: copy $ROOT/rules.
 EOF
 fi

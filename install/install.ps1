@@ -48,6 +48,7 @@ if (-not $keep) {
   $values = [ordered]@{
     TOKEN_ENCRYPTION_KEY = New-Secret
     WEBHOOK_SECRET       = ((New-Secret) -replace '[^A-Za-z0-9]', '').Substring(0, 32)
+    CI_RESULTS_SECRET    = ((New-Secret) -replace '[^A-Za-z0-9]', '').Substring(0, 32)
   }
   if ($Demo) {
     Say 'Demo mode: in-memory fake GitLab and a scripted agent (no real LLM)'
@@ -55,6 +56,7 @@ if (-not $keep) {
       PUBLIC_URL = 'http://localhost:8080'; GIT_PROVIDER = 'gitlab'; GIT_BASE_URL = 'http://fakegitlab:8929'
       GIT_OAUTH_URL = 'http://localhost:8929'; GIT_REPO = 'demo/specs'; GITLAB_CLIENT_ID = 'demo'
       GITLAB_CLIENT_SECRET = 'demo'; BOOTSTRAP_ADMINS = 'admin'
+      GITLAB_BOT_TOKEN = 'demo-bot-' + ((New-Secret) -replace '[^A-Za-z0-9]', '').Substring(0, 12); HOOKS_URL = 'http://api:8080'
     }
   } else {
     $publicUrl = (Ask 'Public URL of Hammurapi' 'http://localhost:8080').TrimEnd('/')
@@ -68,6 +70,7 @@ if (-not $keep) {
     if ($Provider -eq 'gitlab') {
       $values.GITLAB_CLIENT_ID = Ask 'GitLab OAuth application ID' ''
       $values.GITLAB_CLIENT_SECRET = Ask 'GitLab OAuth application secret' ''
+      $values.GITLAB_BOT_TOKEN = Ask 'Token of the bot user (agent branches and MRs in service repositories)' ''
     } else {
       $values.GITHUB_APP_ID = Ask 'GitHub App ID' ''
       $values.GITHUB_CLIENT_ID = Ask 'GitHub App client ID' ''
