@@ -1,5 +1,7 @@
-# actionlint: проверки после выкатки вызываются косвенно через check — SC2329 не ошибка.
+# actionlint: проверки после выкатки вызываются косвенно через check — это не ошибка.
+# shellcheck до 0.10 сообщает об этом как SC2317 (так на ubuntu-24.04), с 0.10 — SC2329.
 paths:
   .github/workflows/deploy-component.yml:
     ignore:
+      - 'SC2317'
       - 'SC2329'
