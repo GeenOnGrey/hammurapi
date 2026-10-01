@@ -26,6 +26,7 @@ rules**. The code lives in two sibling repositories:
 
 ## Contents
 
+- [Hammurapi SDLC (H-SDLC)](#hammurapi-sdlc-h-sdlc)
 - [How it works](#how-it-works)
 - [Features](#features)
 - [Quick start](#quick-start)
@@ -35,13 +36,35 @@ rules**. The code lives in two sibling repositories:
 - [Documentation](#documentation)
 - [Development](#development)
 
+## Hammurapi SDLC (H-SDLC)
+
+<p align="center">
+  <img src="docs/images/hammurapi-sdlc.png" alt="H-SDLC: Discovery → Development → Delivery, and back to Discovery" width="100%">
+</p>
+
+The Hammurapi software development lifecycle (**H-SDLC**) has three stages — **Discovery**,
+**Development** and **Delivery**. They go one after another in a circle: what a release teaches
+you becomes the input of the next Discovery.
+
+| Stage | What happens | What Hammurapi automates |
+| --- | --- | --- |
+| **Discovery** | An idea or a problem becomes an issue; its value and a way to measure it are worked out, and the issue is accepted into a feature | The agent analyses every new issue: value, a metric checked against a real metric source, context, similar issues and features |
+| **Development** | The feature goes through the specifications — product, design, architecture, tech, QA — and becomes code | Quality gates in a strict order, generated tech and QA specifications, code generation into pull requests in every service, CI results linked to test cases |
+| **Delivery** | The changes are merged, deployed and measured | Merge in the service order, deploy, feature flags, the value metric against its target, confirmation — or one-click rollback |
+
+**Hammurapi automates this lifecycle.** People make the decisions — accept an issue, approve a
+specification, sign the validation, confirm a release — and Hammurapi with its AI agent does the
+work between them. Every step is a durable workflow, so nothing is lost on a restart, and git stays
+the source of truth for every document and line of code. Delivery closes the circle: the value
+metric of a release confirms the feature, and a rollback returns its issues to Discovery.
+
 ## How it works
 
-The cycle has three stages, each a page in the web app:
+The H-SDLC stages are the pages of the web app:
 
 ```text
-Research      issue ISS.FMS.CAR-0012 (idea | problem)
-              → Discovery: the agent writes value, metric and context, finds similar work
+Discovery     issue ISS.FMS.CAR-0012 (idea | problem)
+              → Analysis: the agent writes value, metric and context, finds similar work
               → an expert accepts it into a feature
 Development   feature FTR.FMS.CAR-0005
               → product → design → arch  (people write, experts approve)
@@ -50,7 +73,7 @@ Development   feature FTR.FMS.CAR-0005
               → validation: CI results per QA test case, product and technical signatures
 Delivery      release RLS.FMS.CAR-0003
               → merge in the service order → deploy → feature flag → value metric → confirm
-              → or rollback: revert, redeploy, flag off, issues back to research
+              → or rollback: revert, redeploy, flag off, issues back to Discovery
 ```
 
 Each gate is a markdown document with a status:
@@ -79,8 +102,8 @@ every commit carries trailers linking it to the feature, the task and the initia
 ## Features
 
 - **General page**: what waits for *you* (approvals, signatures, blocked steps, confirmations),
-  and a board of research, development and delivery, updated live.
-- **Research**: issues from people or the agent, **Discovery** by the agent (value, a measurable
+  and a board of Discovery, Development and Delivery, updated live.
+- **Discovery**: issues from people or the agent, **Analysis** by the agent (value, a measurable
   metric checked against a real metric source, context, similar issues and features); accept,
   reject, merge or move.
 - **Quality gates** for product, design, architecture, tech and QA specifications, with

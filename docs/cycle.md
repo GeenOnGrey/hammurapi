@@ -3,7 +3,7 @@
 Hammurapi runs a feature from an issue to a confirmed release (PLT.HMR-0002):
 
 ```text
-Research      issue (idea | problem) → Discovery by the agent → accepted
+Discovery     issue (idea | problem) → Analysis by the agent → accepted
 Development   feature → human gates (product, design, arch) → generated gates (tech, qa)
               → codegen: one runner task per service → PRs → CI results → validation → signatures
 Delivery      release: merge → deploy → flag → value metric → confirm   (or rollback)
@@ -174,7 +174,7 @@ product expert marks the flag state by hand on the release.
 
 ## 7. Metric sources
 
-Discovery defines the value metric of an issue (source, query, target, window); the release page
+The Analysis of an issue defines its value metric (source, query, target, window); the release page
 shows it and the confirmation compares it with the target. Sources are read-only
 (Administration → Metric sources):
 
@@ -185,7 +185,7 @@ shows it and the confirmation compares it with the target. Sources are read-only
 
 **Test** runs a query (dry run) and returns the value or the source's error. Credentials are stored
 encrypted or referenced as `env:VARIABLE`. The agent uses the same check (`test_metric_query`) while
-writing Discovery.
+writing the Analysis.
 
 ## 8. Release and rollback
 
@@ -193,8 +193,8 @@ A signed validation creates a release (`RLS.…`): merge PRs in the service orde
 spec (the spec PR last), wait for the tags, deploy, switch the flag, show the metric and wait
 for confirmation by a product expert. A failed step blocks the release with the reason and offers
 **retry** or **rollback**. A rollback reverts the merged PRs (restoring files from the merge
-parent), deploys again, switches the flag off, closes open PRs, returns the issues to research
-with a link to the release and starts a new Discovery.
+parent), deploys again, switches the flag off, closes open PRs, returns the issues to Discovery
+with a link to the release and starts a new Analysis.
 
 ## Deviations from the specification
 
