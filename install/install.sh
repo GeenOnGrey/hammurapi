@@ -12,7 +12,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PARENT=$(dirname "$ROOT")
-REPO_BASE=${REPO_BASE:-https://github.com/GeenOnGrey}
+REPO_BASE=${REPO_BASE:-https://github.com/GreenOnGrey}
 DEMO=0; YES=0; PROVIDER=${GIT_PROVIDER:-}; VOICE=0
 
 usage() { sed -n '2,12p' "$0"; exit 0; }

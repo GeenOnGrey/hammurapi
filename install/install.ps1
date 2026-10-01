@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $Parent = Split-Path -Parent $Root
-$RepoBase = if ($env:REPO_BASE) { $env:REPO_BASE } else { 'https://github.com/GeenOnGrey' }
+$RepoBase = if ($env:REPO_BASE) { $env:REPO_BASE } else { 'https://github.com/GreenOnGrey' }
 
 function Say($m) { Write-Host "> $m" -ForegroundColor Magenta }
 function Die($m) { Write-Host "x $m" -ForegroundColor Red; exit 1 }
