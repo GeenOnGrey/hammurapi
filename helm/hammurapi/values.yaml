@@ -1,11 +1,21 @@
 # Core image (release target of hammurapi-core: Hammurapi + Pi + the hammurapi-workspace
 # extension). Used by every mode; the agent operator needs this image.
-image: { repository: registry.example.com/hammurapi-core, tag: "1.2.0", pullPolicy: IfNotPresent }
+image:
+  {
+    repository: registry.example.com/hammurapi-core,
+    tag: "1.2.0",
+    pullPolicy: IfNotPresent,
+  }
 # Optional smaller image for cleaner and migrate (e.g. the distroless default target); defaults to `image`.
 coreImage: {}
 web:
   enabled: true
-  image: { repository: registry.example.com/hammurapi-web, tag: "1.1.0", pullPolicy: IfNotPresent }
+  image:
+    {
+      repository: registry.example.com/hammurapi-web,
+      tag: "1.1.0",
+      pullPolicy: IfNotPresent,
+    }
   replicas: 2
   resources: { requests: { cpu: 50m, memory: 64Mi } }
 
@@ -19,7 +29,7 @@ worker:
   replicas: 1
   # Agent scenarios (Analysis, gate generation, checks) and the MCP of task sessions (:8083).
   resources: { requests: { cpu: 200m, memory: 512Mi } }
-# The agent operator (PLT.HMR-0004): a Pi process per chat or task session. One replica:
+# The agent operator (HMR.CMN-0004): a Pi process per chat or task session. One replica:
 # sessions live in the process; chats restore from S3 snapshots after a restart.
 agent:
   resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 3Gi } }
@@ -41,7 +51,11 @@ runner:
     # self-hosted GitLab here if it lives in a private network.
     egress:
       - to:
-          - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
+          - ipBlock:
+              {
+                cidr: 0.0.0.0/0,
+                except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16],
+              }
         ports:
           - { port: 443, protocol: TCP }
 cleaner:
@@ -50,8 +64,14 @@ cleaner:
 migrate:
   resources: { requests: { cpu: 50m, memory: 64Mi } }
 
-podSecurityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
-securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: false, capabilities: { drop: [ALL] } }
+podSecurityContext:
+  { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+securityContext:
+  {
+    allowPrivilegeEscalation: false,
+    readOnlyRootFilesystem: false,
+    capabilities: { drop: [ALL] },
+  }
 
 service:
   type: ClusterIP
@@ -60,14 +80,14 @@ ingress:
   enabled: true
   className: nginx
   host: hammurapi.example.com
-  tls: []            # - { secretName: hammurapi-tls, hosts: [hammurapi.example.com] }
+  tls: [] # - { secretName: hammurapi-tls, hosts: [hammurapi.example.com] }
   annotations: {}
   # Binds a user to one api pod by cookie: the SSE stream with the chat answer lives there.
   stickySessions: true
 
 probes:
-  liveness:  { path: /healthz, port: 9100 }
-  readiness: { path: /readyz,  port: 9100 }
+  liveness: { path: /healthz, port: 9100 }
+  readiness: { path: /readyz, port: 9100 }
 
 # Non-secret configuration (ConfigMap). See docs/configuration.md.
 config:

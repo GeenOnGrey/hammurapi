@@ -1,6 +1,6 @@
 # Development cycle: setup and integrations
 
-Hammurapi runs a feature from an issue to a confirmed release (PLT.HMR-0002):
+Hammurapi runs a feature from an issue to a confirmed release (HMR.CMN-0002):
 
 ```text
 Discovery     issue (idea | problem) → Analysis by the agent → accepted

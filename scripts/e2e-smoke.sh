@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test of the closed cycle (PLT.HMR-0002) against the demo stack:
+# End-to-end smoke test of the closed cycle (HMR.CMN-0002) against the demo stack:
 #   docker compose --profile demo up -d --build && scripts/e2e-smoke.sh
 # Uses the fake GitLab (sign-in as any login; specification and service
 # repositories, MRs, CI results, deploy target, Prometheus) and the real agent
@@ -63,7 +63,7 @@ call anna POST /admin/api/v1/domains '{"key":"XX","name":"x"}' >/dev/null; expec
 call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":true,"areaAdmin":["product"]}' >/dev/null; expect 204 "roles: global admin + product area admin (no editor/approver roles)"
 call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":false,"areaAdmin":[]}' >/dev/null; expect 409 "last global admin cannot be removed"
 
-echo "Agent configuration (PLT.HMR-0004)"
+echo "Agent configuration (HMR.CMN-0004)"
 conn=$(call admin GET /admin/api/v1/agent/connections); expect 200 "Admin → Agent: connections"
 [[ $(echo "$conn" | json 'len(d["items"])') -ge 1 ]] && ok "the first LLM connection from BOOTSTRAP_DEEPSEEK_API_KEY" || die "no connection: $conn"
 call anna GET /admin/api/v1/agent/connections >/dev/null; expect 403 "the Agent section is for global administrators only"

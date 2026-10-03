@@ -1,4 +1,4 @@
-# Переиспользуемая выкатка Hammurapi (PLT.INFRA-0002, техспека п. 2): вызывается
+# Переиспользуемая выкатка Hammurapi (HMR.INFRA-0002, техспека п. 2): вызывается
 # release.yml репозиториев hammurapi-core и hammurapi-web.
 #   uses: GreenOnGrey/hammurapi/.github/workflows/deploy-component.yml@<DEPLOY_WORKFLOW_REF>
 #
@@ -13,8 +13,8 @@ on:
     inputs:
       component: { type: string, required: true }            # hammurapi-core | hammurapi-web
       tag: { type: string, required: true }                  # vX.Y.Z
-      run_id: { type: string, default: "" }                  # контракт PLT.HMR-0002
-      callback_url: { type: string, default: "" }            # контракт PLT.HMR-0002
+      run_id: { type: string, default: "" }                  # контракт HMR.CMN-0002
+      callback_url: { type: string, default: "" }            # контракт HMR.CMN-0002
       environment: { type: string, default: production }
       verify_signature: { type: boolean, default: false }    # выкатка без пересборки: cosign verify
       allow_key_rotation: { type: boolean, default: false }
@@ -41,7 +41,7 @@ jobs:
         run: |
           cat >"$RUNNER_TEMP/hmr.sh" <<'EOF'
           # send_callback <started|success|failure> [ошибка] — вебхук результата
-          # по контракту PLT.HMR-0002: HMAC-SHA256 тела, заголовки X-Hammurapi-*.
+          # по контракту HMR.CMN-0002: HMAC-SHA256 тела, заголовки X-Hammurapi-*.
           send_callback() {
             [[ -n $CALLBACK_URL ]] || return 0
             local status=$1 err=${2:-} body ts sig i
@@ -197,7 +197,7 @@ jobs:
           HAMMURAPI_WEBHOOK_SECRET: ${{ secrets.HAMMURAPI_WEBHOOK_SECRET }}
           HAMMURAPI_TOKEN_ENCRYPTION_KEY: ${{ secrets.HAMMURAPI_TOKEN_ENCRYPTION_KEY }}
           # Необязательный: ключ DeepSeek для первого запуска; дальше подключения
-          # к LLM настраиваются в «Администрирование → Агент» (PLT.HMR-0004).
+          # к LLM настраиваются в «Администрирование → Агент» (HMR.CMN-0004).
           HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY: ${{ secrets.HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY }}
           HAMMURAPI_GHCR_PULL_TOKEN: ${{ secrets.HAMMURAPI_GHCR_PULL_TOKEN }}
         run: |
