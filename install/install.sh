@@ -7,7 +7,7 @@
 #
 # Environment overrides (non-interactive): PUBLIC_URL GIT_PROVIDER GIT_BASE_URL GIT_REPO
 # GIT_DEFAULT_BRANCH GITLAB_CLIENT_ID GITLAB_CLIENT_SECRET GITHUB_APP_ID GITHUB_CLIENT_ID
-# GITHUB_CLIENT_SECRET GITHUB_APP_PRIVATE_KEY BOOTSTRAP_ADMINS AGENT_TARGET ACP_AGENT_ENV
+# GITHUB_CLIENT_SECRET GITHUB_APP_PRIVATE_KEY BOOTSTRAP_ADMINS DEEPSEEK_API_KEY
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -69,9 +69,10 @@ if [[ $KEEP == 0 ]]; then
   set_env TOKEN_ENCRYPTION_KEY "$(secret)"
   set_env WEBHOOK_SECRET "$(secret | tr -dc 'A-Za-z0-9' | head -c 32)"
   set_env CI_RESULTS_SECRET "$(secret | tr -dc 'A-Za-z0-9' | head -c 32)"
+  set_env AGENT_SERVICE_TOKEN "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
   if [[ $DEMO == 1 ]]; then
-    say "Demo mode: in-memory fake GitLab and a scripted agent (no real LLM)"
+    say "Demo mode: in-memory fake GitLab and a scripted LLM for the agent (fakellm)"
     set_env PUBLIC_URL http://localhost:8080
     set_env GIT_PROVIDER gitlab
     set_env GIT_BASE_URL http://fakegitlab:8929
@@ -82,6 +83,8 @@ if [[ $KEEP == 0 ]]; then
     set_env BOOTSTRAP_ADMINS admin
     set_env GITLAB_BOT_TOKEN "demo-bot-$(secret | tr -dc 'A-Za-z0-9' | head -c 12)"
     set_env HOOKS_URL http://api:8080
+    set_env BOOTSTRAP_DEEPSEEK_API_KEY sk-demo-fakellm
+    set_env BOOTSTRAP_DEEPSEEK_BASE_URL http://fakellm:8099
   else
     ask PUBLIC_URL "Public URL of Hammurapi" "http://localhost:8080"
     ask PROVIDER "Git provider (github/gitlab)" "gitlab"
@@ -103,7 +106,7 @@ if [[ $KEEP == 0 ]]; then
       set_env GITHUB_APP_ID "$GITHUB_APP_ID"; set_env GITHUB_CLIENT_ID "$GITHUB_CLIENT_ID"; set_env GITHUB_CLIENT_SECRET "$GITHUB_CLIENT_SECRET"
     fi
     ask BOOTSTRAP_ADMINS "Logins of the first administrators (comma-separated)" ""
-    ask AGENT_TARGET "Agent: fake (scripted, for testing) or claude (Claude Code over ACP)" "fake"
+    ask DEEPSEEK_API_KEY "DeepSeek API key for the agent (empty: add an LLM connection later in Admin → Agent)" ""
     [[ -n $GIT_REPO ]] || die "the repository is required"
     set_env PUBLIC_URL "${PUBLIC_URL%/}"
     set_env GIT_PROVIDER "$PROVIDER"
@@ -111,12 +114,7 @@ if [[ $KEEP == 0 ]]; then
     set_env GIT_REPO "$GIT_REPO"
     set_env GIT_DEFAULT_BRANCH "$GIT_DEFAULT_BRANCH"
     set_env BOOTSTRAP_ADMINS "$BOOTSTRAP_ADMINS"
-    set_env AGENT_TARGET "$AGENT_TARGET"
-    if [[ $AGENT_TARGET == claude ]]; then
-      set_env ACP_AGENT_COMMAND claude-agent-acp
-      ask ANTHROPIC_API_KEY "Anthropic API key for the agent" ""
-      set_env ACP_AGENT_ENV "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
-    fi
+    set_env BOOTSTRAP_DEEPSEEK_API_KEY "$DEEPSEEK_API_KEY"
   fi
   chmod 600 "$ENV_FILE"
   say "Wrote $ENV_FILE"

@@ -1,6 +1,7 @@
-# Instance image = Hammurapi + ACP agent (see Dockerfile.instance). Used by api, worker and runner Jobs.
-image: { repository: registry.example.com/hammurapi, tag: "1.1.0", pullPolicy: IfNotPresent }
-# cleaner and migrate do not need the agent; defaults to `image`.
+# Core image (release target of hammurapi-core: Hammurapi + Pi + the hammurapi-workspace
+# extension). Used by every mode; the agent operator needs this image.
+image: { repository: registry.example.com/hammurapi-core, tag: "1.2.0", pullPolicy: IfNotPresent }
+# Optional smaller image for cleaner and migrate (e.g. the distroless default target); defaults to `image`.
 coreImage: {}
 web:
   enabled: true
@@ -13,24 +14,30 @@ imagePullSecrets: []
 api:
   replicas: 2
   resources: { requests: { cpu: 200m, memory: 256Mi } }
-  # Agent processes (ACP_MAX_PROCESSES) run inside the api pod: size limits for them.
   extraEnv: []
 worker:
   replicas: 1
-  # The worker runs one-off agent sessions (Discovery, gate generation, checks).
+  # Agent scenarios (Analysis, gate generation, checks) and the MCP of task sessions (:8083).
   resources: { requests: { cpu: 200m, memory: 512Mi } }
+# The agent operator (PLT.HMR-0004): a Pi process per chat or task session. One replica:
+# sessions live in the process; chats restore from S3 snapshots after a restart.
+agent:
+  resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 3Gi } }
+  maxSessions: 20
+  maxTaskSessions: 4
+  workSizeLimit: 2Gi
 runner:
   # k8s: one Job per code task in `namespace`; local: subprocesses of the worker (demo only).
   executor: k8s
   namespace: hammurapi-runners
   createNamespace: true
-  # Runner image; defaults to `image` (it needs the agent).
+  # Runner image; defaults to `image`.
   image: {}
-  # Secret in the runner namespace with the agent credentials (e.g. ANTHROPIC_API_KEY), passed as envFrom.
-  agentSecret: hammurapi-runner-agent
+  # Workspace server of a task: Pi's file and shell tools, reachable from the agent operator only.
+  workspacePort: 8095
   networkPolicy:
     enabled: true
-    # Extra egress of runner pods: git provider API and LLM API. Add the CIDR of a
+    # Extra egress of runner pods: the git provider API. Add the CIDR of a
     # self-hosted GitLab here if it lives in a private network.
     egress:
       - to:
@@ -55,7 +62,7 @@ ingress:
   host: hammurapi.example.com
   tls: []            # - { secretName: hammurapi-tls, hosts: [hammurapi.example.com] }
   annotations: {}
-  # Binds a user to one api pod by cookie: the ACP session and the SSE stream live there.
+  # Binds a user to one api pod by cookie: the SSE stream with the chat answer lives there.
   stickySessions: true
 
 probes:
@@ -83,10 +90,8 @@ config:
   WORKFLOW_MAX_ATTEMPTS: "8"
   WORKFLOW_LEASE: 2m
   DISCOVERY_TIMEOUT: 20m
-  ACP_AGENT_COMMAND: claude-agent-acp
-  ACP_AGENT_ARGS: ""
-  ACP_MAX_PROCESSES: "4"
-  ACP_SESSION_IDLE_TIMEOUT: 30m
+  # Idle chat and task sessions of the agent are saved and closed after this time.
+  AGENT_IDLE_TIMEOUT: 15m
   KAFKA_BROKERS: kafka:9092
   S3_ENDPOINT: minio:9000
   S3_BUCKET: hammurapi
@@ -109,7 +114,8 @@ secrets: {}
   # WEBHOOK_SECRET: …
   # GITLAB_CLIENT_ID / GITLAB_CLIENT_SECRET or GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
   # S3_ACCESS_KEY / S3_SECRET_KEY
-  # ACP_AGENT_ENV: ANTHROPIC_API_KEY=…
+  # AGENT_SERVICE_TOKEN: <openssl rand -hex 32>   (required: api, worker and the agent operator)
+  # BOOTSTRAP_DEEPSEEK_API_KEY: …  (optional: the first LLM connection; later Administration → Agent)
   # GITLAB_BOT_TOKEN: …            (GitLab: token of the bot account; GitHub uses the App)
   # CI_RESULTS_SECRET: …           (HMAC of /hooks/v1/ci-results; two comma-separated values while rotating)
 

@@ -23,6 +23,20 @@ metadata:
 spec:
   selector: {{- include "hammurapi.selector" (dict "root" . "component" "worker") | nindent 4 }}
   ports:
+    - { name: mcp, port: 8083, targetPort: mcp }
+    - { name: service, port: 9100, targetPort: service }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hammurapi.fullname" . }}-agent
+  labels:
+    {{- include "hammurapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector: {{- include "hammurapi.selector" (dict "root" . "component" "agent") | nindent 4 }}
+  ports:
+    - { name: http, port: 8090, targetPort: http }
     - { name: service, port: 9100, targetPort: service }
 {{- if .Values.web.enabled }}
 ---

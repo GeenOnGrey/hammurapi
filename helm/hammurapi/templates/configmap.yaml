@@ -13,4 +13,9 @@ data:
   RUNNER_EXECUTOR: {{ .Values.runner.executor | quote }}
   RUNNER_NAMESPACE: {{ .Values.runner.namespace | quote }}
   RUNNER_IMAGE: {{ include "hammurapi.runnerImage" . | quote }}
-  RUNNER_AGENT_SECRET: {{ .Values.runner.agentSecret | quote }}
+  RUNNER_WORKSPACE_PORT: {{ .Values.runner.workspacePort | quote }}
+  # The agent operator and the worker's MCP of task sessions.
+  AGENT_ADDR: {{ printf "http://%s-agent.%s.svc:8090" (include "hammurapi.fullname" .) .Release.Namespace | quote }}
+  AGENT_RUNNER_URL: {{ printf "http://%s-agent.%s.svc:8090" (include "hammurapi.fullname" .) .Release.Namespace | quote }}
+  WORKER_MCP_ADDR: ":8083"
+  WORKER_MCP_URL: {{ printf "http://%s-worker.%s.svc:8083" (include "hammurapi.fullname" .) .Release.Namespace | quote }}

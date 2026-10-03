@@ -49,14 +49,16 @@ if (-not $keep) {
     TOKEN_ENCRYPTION_KEY = New-Secret
     WEBHOOK_SECRET       = ((New-Secret) -replace '[^A-Za-z0-9]', '').Substring(0, 32)
     CI_RESULTS_SECRET    = ((New-Secret) -replace '[^A-Za-z0-9]', '').Substring(0, 32)
+    AGENT_SERVICE_TOKEN  = -join ([Convert]::FromBase64String((New-Secret)) | ForEach-Object { '{0:x2}' -f $_ })
   }
   if ($Demo) {
-    Say 'Demo mode: in-memory fake GitLab and a scripted agent (no real LLM)'
+    Say 'Demo mode: in-memory fake GitLab and a scripted LLM for the agent (fakellm)'
     $values += [ordered]@{
       PUBLIC_URL = 'http://localhost:8080'; GIT_PROVIDER = 'gitlab'; GIT_BASE_URL = 'http://fakegitlab:8929'
       GIT_OAUTH_URL = 'http://localhost:8929'; GIT_REPO = 'demo/specs'; GITLAB_CLIENT_ID = 'demo'
       GITLAB_CLIENT_SECRET = 'demo'; BOOTSTRAP_ADMINS = 'admin'
       GITLAB_BOT_TOKEN = 'demo-bot-' + ((New-Secret) -replace '[^A-Za-z0-9]', '').Substring(0, 12); HOOKS_URL = 'http://api:8080'
+      BOOTSTRAP_DEEPSEEK_API_KEY = 'sk-demo-fakellm'; BOOTSTRAP_DEEPSEEK_BASE_URL = 'http://fakellm:8099'
     }
   } else {
     $publicUrl = (Ask 'Public URL of Hammurapi' 'http://localhost:8080').TrimEnd('/')
@@ -77,11 +79,7 @@ if (-not $keep) {
       $values.GITHUB_CLIENT_SECRET = Ask 'GitHub App client secret' ''
     }
     $values.BOOTSTRAP_ADMINS = Ask 'Logins of the first administrators (comma-separated)' ''
-    $values.AGENT_TARGET = Ask 'Agent: fake or claude' 'fake'
-    if ($values.AGENT_TARGET -eq 'claude') {
-      $values.ACP_AGENT_COMMAND = 'claude-agent-acp'
-      $values.ACP_AGENT_ENV = 'ANTHROPIC_API_KEY=' + (Ask 'Anthropic API key' '')
-    }
+    $values.BOOTSTRAP_DEEPSEEK_API_KEY = Ask 'DeepSeek API key for the agent (empty: add an LLM connection later in Admin -> Agent)' ''
     if (-not $values.GIT_REPO) { Die 'the repository is required' }
   }
   $lines = Get-Content (Join-Path $Root '.env.example')

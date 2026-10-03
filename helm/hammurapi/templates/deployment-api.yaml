@@ -22,7 +22,6 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api
-          # Instance image: Hammurapi + the ACP agent (subprocess over stdio).
           image: {{ include "hammurapi.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["api"]

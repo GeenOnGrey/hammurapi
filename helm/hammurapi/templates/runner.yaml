@@ -45,9 +45,10 @@ subjects:
     namespace: {{ .Release.Namespace }}
 {{- if .Values.runner.networkPolicy.enabled }}
 ---
-# Runner pods accept no connections and reach only DNS, the internal API of
-# Hammurapi (task description, git token, progress, result, MCP) and the
-# destinations listed in runner.networkPolicy.egress (git provider, LLM API).
+# Runner pods accept connections only from the agent operator (workspace server)
+# and reach only DNS, the internal API of Hammurapi (task description, git token,
+# progress, result, MCP), the agent operator (the task's session) and the
+# destinations listed in runner.networkPolicy.egress (git provider).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -58,7 +59,14 @@ spec:
   podSelector:
     matchLabels: { app.kubernetes.io/name: hammurapi-runner }
   policyTypes: [Ingress, Egress]
-  ingress: []
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} }
+          podSelector:
+            matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "agent") | nindent 14 }}
+      ports:
+        - { port: {{ .Values.runner.workspacePort }}, protocol: TCP }
   egress:
     - to:
         - namespaceSelector: {}
@@ -74,6 +82,13 @@ spec:
             matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "api") | nindent 14 }}
       ports:
         - { port: 8081, protocol: TCP }
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} }
+          podSelector:
+            matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "agent") | nindent 14 }}
+      ports:
+        - { port: 8090, protocol: TCP }
     {{- with .Values.runner.networkPolicy.egress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

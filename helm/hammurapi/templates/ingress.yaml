@@ -7,7 +7,7 @@ metadata:
   labels: {{- include "hammurapi.labels" . | nindent 4 }}
   annotations:
     {{- if .Values.ingress.stickySessions }}
-    # Sticky sessions: the user's ACP session and SSE stream live in one api pod.
+    # Sticky sessions: the user's SSE stream with the chat answer lives in one api pod.
     nginx.ingress.kubernetes.io/affinity: cookie
     nginx.ingress.kubernetes.io/session-cookie-name: hmr_route
     nginx.ingress.kubernetes.io/session-cookie-samesite: Lax

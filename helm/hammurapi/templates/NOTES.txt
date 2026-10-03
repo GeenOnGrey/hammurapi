@@ -8,7 +8,8 @@ Hammurapi {{ .Chart.AppVersion }} is deployed.
   OAuth callback: {{ .Values.config.PUBLIC_URL }}/api/v1/auth/callback
 
 The first sign-in of a login listed in BOOTSTRAP_ADMINS gets the global administrator role.
+LLM connections and models of the agent: Administration → Agent (BOOTSTRAP_DEEPSEEK_API_KEY creates the first one).
 Cleaner schedule: {{ .Values.cleaner.schedule }}
 {{- if eq .Values.runner.executor "k8s" }}
-Code tasks run as Jobs in namespace {{ .Values.runner.namespace }}; create Secret {{ .Values.runner.agentSecret }} there with the agent credentials.
+Code tasks run as Jobs in namespace {{ .Values.runner.namespace }}.
 {{- end }}

@@ -1,0 +1,75 @@
+# The agent operator (PLT.HMR-0004): a Pi process per chat or task session.
+# It gets only its token: LLM keys, MCP servers and skills arrive with each
+# session request from api, worker and runner tasks.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hammurapi.fullname" . }}-agent
+  labels:
+    {{- include "hammurapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  replicas: 1
+  # Sessions live in the process: the old pod stops before the new one starts.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "agent") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "hammurapi.selector" (dict "root" . "component" "agent") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      automountServiceAccountToken: false
+      containers:
+        - name: agent
+          image: {{ include "hammurapi.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["agent"]
+          ports:
+            - { name: http, containerPort: 8090 }
+            - { name: service, containerPort: 9100 }
+          env:
+            - { name: AGENT_LISTEN_ADDR, value: ":8090" }
+            - { name: SERVICE_ADDR, value: ":9100" }
+            - { name: AGENT_WORKDIR, value: /work }
+            - { name: AGENT_MAX_SESSIONS, value: {{ .Values.agent.maxSessions | quote }} }
+            - { name: AGENT_MAX_TASK_SESSIONS, value: {{ .Values.agent.maxTaskSessions | quote }} }
+            - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.config.AGENT_IDLE_TIMEOUT | default "15m" | quote }} }
+            - name: AGENT_SERVICE_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "hammurapi.secretName" . }}, key: AGENT_SERVICE_TOKEN } }
+          {{- include "hammurapi.probes" . | nindent 10 }}
+          resources: {{- toYaml .Values.agent.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - { name: work, mountPath: /work }
+      volumes:
+        - { name: work, emptyDir: { sizeLimit: {{ .Values.agent.workSizeLimit }} } }
+---
+# Only api, worker and runner tasks may call the operator.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hammurapi.fullname" . }}-agent
+  labels: {{- include "hammurapi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "agent") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "api") | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "hammurapi.selector" (dict "root" . "component" "worker") | nindent 14 }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.runner.namespace }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: hammurapi-runner }
+      ports:
+        - { port: 8090, protocol: TCP }
+    # Probes and metrics.
+    - ports:
+        - { port: 9100, protocol: TCP }

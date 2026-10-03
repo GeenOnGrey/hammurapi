@@ -30,15 +30,18 @@ provider refusals. Development only.
 
 Code tasks run with `RUNNER_EXECUTOR=local` in compose (subprocesses of the worker).
 
-The default agent in compose is **hammurapi-fakeagent** (`hammurapi-core/cmd/fakeagent`), a scripted
-ACP agent. To try a real agent, set `AGENT_TARGET=claude`, `ACP_AGENT_COMMAND=claude-agent-acp` and
-`ACP_AGENT_ENV=ANTHROPIC_API_KEY=…` in `.env` and rebuild `api`.
+The agent in compose is the real one: the `agent` service (the operator with Pi, built from the
+`release` target of `hammurapi-core`). In the `demo` profile its first LLM connection points at
+**fakellm** (`hammurapi-core/cmd/fakellm`), a scripted OpenAI-compatible endpoint
+(`BOOTSTRAP_DEEPSEEK_BASE_URL=http://fakellm:8099`). To try a real model, put a DeepSeek key into
+`BOOTSTRAP_DEEPSEEK_API_KEY` and clear `BOOTSTRAP_DEEPSEEK_BASE_URL` before the first start, or
+add a connection in **Admin → Agent**.
 
 ## Backend
 
 ```sh
 cd hammurapi-core
-make build              # bin/hammurapi, bin/hammurapi-fakeagent
+make build              # bin/hammurapi, bin/fakellm
 make test               # unit tests
 make test-integration   # + Postgres via dockertest v4 (needs Docker)
 make generate           # mocks via `go tool mockgen`
@@ -73,10 +76,10 @@ stack on port 8080 or set `PUBLIC_URL=http://localhost:5173` for the api.
 
 | Level | Where | What |
 | --- | --- | --- |
-| Unit | `hammurapi-core` `go test ./...` | Services on mockgen mocks: roles per area, sequential approval, stale approval, locks, deletion rules, webhook projection and idempotency; ACP pool against the fake agent over stdio (streaming, crash recovery, process limit, refused fs access); MCP permissions; providers against `httptest`; archive parsing (zip bombs, traversal) |
-| Integration | `go test -tags integration ./...` | Every repository query on Postgres 16 in Docker; concurrent numbering; locks; the workflow engine (leases, retries, blocking); the whole cycle from an issue to a release and a rollback with stubbed effects |
+| Unit | `hammurapi-core` `go test ./...` | Services on mockgen mocks: roles per area, sequential approval, stale approval, locks, deletion rules, webhook projection and idempotency; the Pi RPC client against a fake Pi; the agent operator (sessions, limits, tokens, skills cache); LLM error classes; the runner workspace server (paths, symlinks, clean environment); MCP permissions; providers against `httptest`; archive parsing (zip bombs, traversal) |
+| Integration | `go test -tags integration ./...` | Every repository query on Postgres 16 in Docker; migrations; concurrent numbering; locks; the workflow engine (leases, retries, blocking); the whole cycle from an issue to a release and a rollback with stubbed effects; agent configuration; with `HMR_PI_CMD` — the chat through the operator and a real Pi against fakellm (errors, retry, model switch, snapshot restore) |
 | Frontend | `hammurapi-web` `npm test` | All five locales have the same keys and valid ICU; fallback to English; Russian plurals; `Intl` formatting |
-| End to end | `hammurapi/scripts/e2e-smoke.sh` | Through the web origin against the demo stack: an issue, Discovery by the fake agent, acceptance, human gates, generated tech/qa, code generation in the runner, CI results, signatures, a release (merge order, deploy marks, confirmation), a second release through a pipeline, and a rollback |
+| End to end | `hammurapi/scripts/e2e-smoke.sh` | Through the web origin against the demo stack: an issue, Analysis by the agent (Pi + fakellm), acceptance, human gates, generated tech/qa, code generation in the runner, CI results, signatures, a release (merge order, deploy marks, confirmation), a second release through a pipeline, and a rollback |
 
 ## Translations
 

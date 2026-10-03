@@ -49,9 +49,10 @@ repository**: Hammurapi follows PR state, reviews, review comments and tags ther
 
 ## 3. Runner (code tasks)
 
-Each service of a feature is a **task**: a `hammurapi runner` process with the ACP agent that
-checks out the repository through the provider API, lets the agent edit files in a sandboxed
-workspace, commits as the bot and opens or updates the PR.
+Each service of a feature is a **task**: a `hammurapi runner` process that checks out the
+repository through the provider API, opens an agent session in the operator and serves the
+checkout to Pi's file and shell tools (the workspace server, only for the operator), commits as the
+bot and opens or updates the PR.
 
 | `RUNNER_EXECUTOR` | Where tasks run | Use |
 | --- | --- | --- |
@@ -64,16 +65,10 @@ for its repository only, reports progress and the result, and calls MCP tools li
 feature. Limits: `RUNNER_TIMEOUT`, `RUNNER_TOKEN_LIMIT` (agent tokens per task),
 `RUNNER_MAX_PARALLEL`, `RUNNER_MAX_PARALLEL_PER_REPO`.
 
-In Kubernetes create the agent credentials in the runner namespace and let the chart point runners
-at it:
-
-```sh
-kubectl -n hammurapi-runners create secret generic hammurapi-runner-agent \
-  --from-literal=ANTHROPIC_API_KEY=sk-ant-…
-```
-
-The chart's NetworkPolicy lets runner pods reach only DNS, the internal API and HTTPS outside
-private ranges (git provider, LLM API). A self-hosted GitLab in a private network must be added to
+Runner pods need no LLM credentials: the agent runs in the operator, and the task's session gets
+the model and key of the code generation scenario from Hammurapi. The chart's NetworkPolicy lets
+runner pods accept connections only from the operator (the workspace port) and reach only DNS, the
+internal API, the operator and HTTPS outside private ranges (git provider). A self-hosted GitLab in a private network must be added to
 `runner.networkPolicy.egress`.
 
 ## 4. CI results

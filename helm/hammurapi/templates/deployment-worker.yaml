@@ -26,11 +26,11 @@ spec:
       {{- end }}
       containers:
         - name: worker
-          # Instance image: the worker runs agent sessions (Discovery, gates, checks).
           image: {{ include "hammurapi.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["worker"]
           ports:
+            - { name: mcp, containerPort: 8083 }
             - { name: service, containerPort: 9100 }
           {{- include "hammurapi.envFrom" . | nindent 10 }}
           {{- include "hammurapi.probes" . | nindent 10 }}

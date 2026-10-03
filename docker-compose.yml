@@ -6,15 +6,21 @@
 #
 # Expects hammurapi-core and hammurapi-web checked out next to this repository.
 # The git provider is external (GitHub or GitLab). For a demo without one, start
-# the "demo" profile: an in-memory fake GitLab (development only):
+# the "demo" profile: an in-memory fake GitLab and a scripted LLM (fakellm) for
+# the agent (development only):
 #
 #   docker compose --profile demo up -d --build
 #
 # The cleaner runs on demand: docker compose run --rm api cleaner
 #
+# The agent (PLT.HMR-0004) is the operator service "agent": a Pi process per chat
+# or task session, from the release image of hammurapi-core. LLM connections and
+# models are set in Admin → Agent; BOOTSTRAP_DEEPSEEK_API_KEY creates the first one.
+#
 # Agent tasks (code generation, reverts) run with RUNNER_EXECUTOR=local as
 # subprocesses of the worker, in the runner-work volume — for development and
-# demos only; production uses the k8s executor (a Job per task).
+# demos only; production uses the k8s executor (a Job per task). Pi's file and
+# shell tools reach the task's working copy over its workspace server.
 #
 # Metric sources for Discovery: docker compose --profile metrics up -d starts ClickHouse.
 
@@ -80,36 +86,36 @@ services:
 
   api:
     <<: *hammurapi
-    # Hammurapi + agent: the agent runs as a subprocess of api (ACP over stdio).
-    build:
-      context: .
-      dockerfile: Dockerfile.instance
-      target: ${AGENT_TARGET:-fake}
-      additional_contexts:
-        hammurapi: service:migrate
-    image: hammurapi-instance:local
+    image: hammurapi:local
     command: ["api"]
     environment:
       # Internal API (:8081): the chat's MCP endpoint and the runner task API.
       INTERNAL_ADDR: ":8081"
       INTERNAL_URL: http://api:8081
+      AGENT_ADDR: http://agent:8090
     ports: ["8090:8080", "9100:9100"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       kafka: { condition: service_healthy }
       minio: { condition: service_started }
+      agent: { condition: service_started }
 
-  # Workflows, webhooks, imports, Discovery/generation agent sessions and runner
-  # tasks: the worker needs the agent too, so it uses the instance image.
+  # Workflows, webhooks, imports, agent scenarios (Analysis, gate generation,
+  # checks) through the operator, the MCP of task sessions (:8083) and runner tasks.
   worker:
     <<: *hammurapi
-    image: hammurapi-instance:local
+    image: hammurapi:local
     command: ["worker"]
     environment:
       INTERNAL_URL: http://api:8081
+      AGENT_ADDR: http://agent:8090
+      AGENT_RUNNER_URL: http://agent:8090
+      WORKER_MCP_URL: http://worker:8083
       RUNNER_EXECUTOR: local
       RUNNER_WORKDIR: /var/lib/hammurapi/runs
       RUNNER_MAX_PARALLEL: "2"
+      # The operator reaches the workspace server of a local runner task here.
+      RUNNER_WORKSPACE_HOST: worker
     volumes: ["runner-work:/var/lib/hammurapi/runs"]
     ports: ["9101:9100"]
     depends_on:
@@ -117,6 +123,22 @@ services:
       migrate: { condition: service_completed_successfully }
       kafka: { condition: service_healthy }
       minio: { condition: service_started }
+
+  # The agent operator (mode agent): Pi and the hammurapi-workspace extension are
+  # in the release image. It gets only its token: keys arrive with each session.
+  agent:
+    build:
+      context: ../hammurapi-core
+      target: release
+      args: { PI_VERSION: "${PI_VERSION:-1.0.0}" }
+    image: hammurapi-core:local
+    command: ["agent"]
+    environment:
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:?set AGENT_SERVICE_TOKEN in .env}
+      AGENT_IDLE_TIMEOUT: ${AGENT_IDLE_TIMEOUT:-15m}
+    volumes: ["agent-work:/work"]
+    ports: ["9102:9100"]
+    restart: unless-stopped
 
   # Metric sources for Discovery (read-only account "metrics", database "metrics").
   clickhouse:
@@ -156,4 +178,14 @@ services:
     volumes: ["./rules:/seed/rules:ro"]
     ports: ["8929:8929"]
 
-volumes: { postgres-data: {}, kafka-data: {}, minio-data: {}, runner-work: {}, clickhouse-data: {} }
+  # Development only: a scripted OpenAI-compatible LLM for the agent (Analysis,
+  # tech/qa generation, code generation, checks; the chat echoes). With
+  # BOOTSTRAP_DEEPSEEK_BASE_URL=http://fakellm:8099 the first connection uses it.
+  fakellm:
+    build: { context: ../hammurapi-core, target: fakellm }
+    image: hammurapi-fakellm:local
+    profiles: ["demo"]
+    environment: { FAKELLM_ADDR: ":8099" }
+    ports: ["8099:8099"]
+
+volumes: { postgres-data: {}, kafka-data: {}, minio-data: {}, runner-work: {}, agent-work: {}, clickhouse-data: {} }

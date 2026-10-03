@@ -20,9 +20,9 @@ rules**. The code lives in two sibling repositories:
 
 | Repository | What it is |
 | --- | --- |
-| [`hammurapi-core`](../hammurapi-core) | Backend: one Go binary with the modes `api`, `worker`, `runner`, `cleaner`, `migrate` |
+| [`hammurapi-core`](../hammurapi-core) | Backend: one Go binary with the modes `api`, `worker`, `agent`, `runner`, `cleaner`, `migrate`; the release image carries the Pi agent |
 | [`hammurapi-web`](../hammurapi-web) | Frontend: React single-page app with the Milkdown editor |
-| `hammurapi` (this one) | Docs, installer, `docker-compose.yml`, `Dockerfile.instance`, Helm chart, `rules/` |
+| `hammurapi` (this one) | Docs, installer, `docker-compose.yml`, Helm chart, `rules/` |
 
 ## Contents
 
@@ -172,10 +172,11 @@ release and rollback: `scripts/e2e-smoke.sh` against the running demo.
 4. **Set up the bot**: the GitHub App installed on all repositories, or a GitLab bot account with
    `GITLAB_BOT_TOKEN`. Then connect CI results, deploy, feature flags, the catalog and metric
    sources — see [docs/cycle.md](docs/cycle.md).
-5. **Choose the agent.** Hammurapi talks to an agent over the
-   [Agent Client Protocol](https://agentclientprotocol.com) and runs it inside its own containers
-   (`api`, `worker`, runner Jobs). `Dockerfile.instance` builds that image; the `claude` target adds Claude Code via
-   its ACP adapter.
+5. **Connect an LLM.** The agent is [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent),
+   run by Hammurapi's agent operator from the core image. Give it a DeepSeek key with
+   `BOOTSTRAP_DEEPSEEK_API_KEY`, or add the connection after the first sign-in in
+   **Administration → Agent**, where models per scenario, skills and MCP servers are set too
+   (see [docs/agent.md](docs/agent.md)).
 6. **Run it:**
    - single host: `./install/install.sh` asks for the settings, writes `.env`, generates secrets
      and starts Docker Compose;
@@ -189,20 +190,22 @@ release and rollback: `scripts/e2e-smoke.sh` against the running demo.
 ```text
 Browser ── SPA (hammurapi-web) ──▶ api ──────────────▶ GitHub / GitLab API
               ▲   SSE               │ ▲  ▲ :8081 internal   (specs, service repos, CI, tags)
-              │                     │ │  └──────── runner Jobs (agent, one per service task)
-              │                     │ │ ACP                 │ webhooks: git, CI results,
-              │                     │ agent ◀─ MCP tools    │ deploy, feature flags
-              │                     ▼                       ▼
+              │                     │ │  └──────── runner Jobs (one per service task)
+              │                     │ │ MCP tools      ▲ workspace │ webhooks: git, CI results,
+              │                     ▼ │                │ :8095     │ deploy, feature flags
+              │             agent operator (Pi) ◀── sessions ── api, worker, runner Jobs ──▶ LLM
+              │                     ▼                            ▼
               │                 Postgres ◀──── worker ◀── Kafka
-              └──── NOTIFY ◀────────┘  workflows │ agent sessions (Discovery, gates, checks)
+              └──── NOTIFY ◀────────┘  workflows │ agent scenarios (Analysis, gates, checks)
                              MinIO (attachments, archives)   Whisper (voice)   metric sources
 ```
 
 | Component | Role |
 | --- | --- |
-| `api` | REST API for the SPA and admin panel, SSE stream, webhook intake (git, CI results, deploy, flags), chat agent pool, internal API on `:8081` (MCP, runner tasks) |
-| `worker` | Kafka consumers (git events, imports), the workflow engine (Discovery, gate generation, code generation, validation, release, rollback), one-off agent sessions, runner Jobs, daily catalog sync |
-| `runner` | One code task: checks out a service repository through the provider API, runs the agent in a sandboxed workspace, commits as the bot, opens or updates the PR |
+| `api` | REST API for the SPA and admin panel (including Administration → Agent), SSE stream, webhook intake (git, CI results, deploy, flags), the chat, internal API on `:8081` (MCP, runner tasks) |
+| `worker` | Kafka consumers (git events, imports), the workflow engine (Discovery, gate generation, code generation, validation, release, rollback), agent scenarios through the operator, runner Jobs, daily catalog sync |
+| `agent` | The agent operator: a Pi process per chat or task session, with the model, key, skills and MCP servers of the scenario |
+| `runner` | One code task: checks out a service repository through the provider API, opens an agent session and serves the checkout to Pi's file and shell tools, commits as the bot, opens or updates the PR |
 | `cleaner` | Daily job: expired attachments, sessions, locks, unconfirmed imports, leftover branches |
 | `migrate` | Database migrations (goose), run before `api`/`worker` roll out |
 | Postgres | Issues, features, gates, tasks, releases, workflow runs and outbox, users, roles, chat |
@@ -210,7 +213,7 @@ Browser ── SPA (hammurapi-web) ──▶ api ──────────�
 | Kafka | Git events (partitioned by repository and feature, so changes are applied in order) and imports |
 | MinIO / S3 | Chat attachments and import archives |
 | Whisper | Speech recognition for voice input |
-| Agent | ACP agent running as a subprocess of `api`, `worker` or a runner; reaches Hammurapi only through MCP tools |
+| LLM | The administrator's connection (DeepSeek in the first release); errors are shown in plain words, usage and cost are counted per scenario |
 
 Key design decisions:
 
@@ -229,8 +232,9 @@ Key design decisions:
 - **Untrusted code stays in a sandbox.** Runner Jobs have no service account token, a read-only
   root filesystem, a deadline and a NetworkPolicy; they get a short-lived git token for their one
   repository from the internal API.
-- **Sticky sessions**: a user's ACP session and SSE stream live in one `api` pod; if the user moves
-  to another pod, the session is restored with `session/load` or from the chat history.
+- **Agent sessions live in the operator**: one Pi process per chat or task session; an idle chat
+  session is saved to S3 and restored with the next message, so `api` stays stateless (sticky
+  sessions only keep the streamed answer on the user's SSE connection).
 
 ## Repository layout of a Hammurapi instance
 
@@ -259,7 +263,7 @@ Commits made by Hammurapi carry trailers — `Hammurapi-Feature`, `Hammurapi-Are
 | [docs/configuration.md](docs/configuration.md) | Every environment variable |
 | [docs/git-providers.md](docs/git-providers.md) | GitHub App / GitLab application, webhook, repository setup |
 | [docs/cycle.md](docs/cycle.md) | Development cycle: bot, services and catalog, runner, CI results, deploy, feature flags, metric sources, releases |
-| [docs/agent.md](docs/agent.md) | Connecting an ACP agent, MCP tools, sessions, instance image |
+| [docs/agent.md](docs/agent.md) | The Pi agent and its operator, Administration → Agent, MCP tools, LLM errors, fakellm |
 | [docs/deployment.md](docs/deployment.md) | Docker Compose and Kubernetes (Helm) |
 | [docs/operations.md](docs/operations.md) | Health checks, metrics, logs, tracing, backups, troubleshooting |
 | [docs/api.md](docs/api.md) | HTTP API overview and error codes |

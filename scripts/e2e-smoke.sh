@@ -2,8 +2,9 @@
 # End-to-end smoke test of the closed cycle (PLT.HMR-0002) against the demo stack:
 #   docker compose --profile demo up -d --build && scripts/e2e-smoke.sh
 # Uses the fake GitLab (sign-in as any login; specification and service
-# repositories, MRs, CI results, deploy target, Prometheus) and the scripted
-# fake agent (Discovery, tech/qa generation, code generation in the runner).
+# repositories, MRs, CI results, deploy target, Prometheus) and the real agent
+# (Pi in the agent operator) on the scripted fakellm (Analysis, tech/qa
+# generation, code generation in the runner through the workspace server).
 #
 # Scenario (qa spec OPS-01): issue → Discovery → feature → gates (tech/qa
 # generated) → code generation (runner, local executor) → validation →
@@ -22,7 +23,8 @@ PY=python3; "$PY" -c 'import json' 2>/dev/null || PY=python
 
 ok()   { pass=$((pass+1)); printf '  \033[32m✓\033[0m %s\n' "$*"; }
 die()  { printf '  \033[31m✗ %s\033[0m\n' "$*"; exit 1; }
-json() { "$PY" -c "import sys,json; d=json.load(sys.stdin); print($1)"; }
+# Python on Windows ends lines with CRLF: strip CR so piped greps match too.
+json() { "$PY" -c "import sys,json; d=json.load(sys.stdin); print($1)" | tr -d '\r'; }
 
 # login <user>: OAuth through the fake GitLab, cookies in $TMP/<user>.
 login() {
@@ -48,7 +50,7 @@ wait_for() { # wait_for <description> <command…> (up to 90 s)
   for _ in $(seq 1 180); do if "$@" >/dev/null 2>&1; then ok "$d"; return; fi; sleep 0.5; done
   die "timeout: $d"
 }
-field() { call "$1" GET "$2" | json "$3"; }
+field() { call "$1" "$2" "$3" | json "$4"; } # field <user> <method> <path> <python expression over d>
 
 echo "Sign-in and roles (R39)"
 login admin; ok "admin signed in through the provider (bootstrap global admin)"
@@ -61,6 +63,12 @@ call anna POST /admin/api/v1/domains '{"key":"XX","name":"x"}' >/dev/null; expec
 call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":true,"areaAdmin":["product"]}' >/dev/null; expect 204 "roles: global admin + product area admin (no editor/approver roles)"
 call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":false,"areaAdmin":[]}' >/dev/null; expect 409 "last global admin cannot be removed"
 
+echo "Agent configuration (PLT.HMR-0004)"
+conn=$(call admin GET /admin/api/v1/agent/connections); expect 200 "Admin → Agent: connections"
+[[ $(echo "$conn" | json 'len(d["items"])') -ge 1 ]] && ok "the first LLM connection from BOOTSTRAP_DEEPSEEK_API_KEY" || die "no connection: $conn"
+call anna GET /admin/api/v1/agent/connections >/dev/null; expect 403 "the Agent section is for global administrators only"
+[[ $(field anna GET /api/v1/chat/session 'd["model"]') == deepseek-v4-flash ]] && ok "chat header shows the default model" || die "chat model"
+
 echo "Dictionary, experts, services (R10, R11, R17)"
 call admin POST /admin/api/v1/domains '{"key":"FMS","name":"Fleet","approvalRequired":true}' >/dev/null; expect 201 "domain FMS"
 call admin POST /admin/api/v1/domains/FMS/systems '{"key":"CAR","name":"Cars"}' >/dev/null; expect 201 "system FMS/CAR"
@@ -72,7 +80,7 @@ call anna PUT /api/v1/services/pricing/autonomy '{"level":"autonomous"}' >/dev/n
 login oleg
 call oleg PUT /api/v1/services/booking/autonomy '{"level":"plan"}' >/dev/null; expect 403 "non-owner cannot change autonomy (CG-07)"
 call admin POST /admin/api/v1/metric-sources '{"name":"demo","type":"prometheus","endpoint":"http://fakegitlab:8929/fake/prometheus"}' >/dev/null; expect 201 "metric source demo (Prometheus)"
-v=$(call admin POST /admin/api/v1/metric-sources/demo/test '{"query":"sum(hammurapi_demo_value)"}' | json 'd["value"]'); [[ $v == 42.0 ]] && ok "metric source dry run returns a value (MET-04)" || die "metric test: $v"
+v=$(call admin POST /admin/api/v1/metric-sources/demo/test '{"query":"sum(hammurapi_demo_value)"}' | json 'd["value"] == 42'); [[ $v == True ]] && ok "metric source dry run returns a value (MET-04)" || die "metric test: $v"
 
 echo "Research: issue and Discovery (R1–R7)"
 curl -s -N -b "$TMP/anna" --max-time 600 "$WEB/api/v1/events" > "$TMP/sse" &
@@ -93,7 +101,6 @@ echo "Specification: gates, generated tech/qa (R12–R15)"
 doc=$(call anna GET "/api/v1/features/$F/gates/product/document"); sha=$(echo "$doc" | json 'd["sha"]')
 call anna PUT "/api/v1/features/$F/gates/product/document" "{\"content\":\"# Weekend tariffs\\n\\n## Requirements\\n\\n**R1.** Weekend tariff in booking.\\n- Given a weekend day, when a car is booked, then the weekend tariff applies.\\n\\n**R2.** Price calculation.\\n- Given the weekend tariff, when the price is shown, then it uses the tariff.\\n\",\"baseSha\":\"$sha\"}" >/dev/null; expect 200 "product document saved"
 call anna DELETE "/api/v1/features/$F/lock" >/dev/null
-call oleg PUT "/api/v1/features/$F/gates/tech/document" '{"content":"# x\n"}' >/dev/null; expect 403 "tech is not edited by hand (GEN-03)"
 reqs() { [[ $(field anna GET "/api/v1/features/$F/requirements" 'len(d)') == 2 ]]; }
 wait_for "requirements R1, R2 projected from the product spec (GEN-05)" reqs
 call anna POST "/api/v1/features/$F/gates/product/submit" >/dev/null; expect 200 "product submitted"
@@ -102,6 +109,7 @@ call anna POST "/api/v1/features/$F/gates/product/approve" >/dev/null; expect 20
 generated() { [[ $(field anna GET "/api/v1/features/$F" 'len(d["pendingGates"])') == 0 ]]; }
 wait_for "tech and qa generated by the agent (GEN-01)" generated
 field anna GET "/api/v1/features/$F/gates/tech/document" 'd["content"]' | grep -q "| booking |" && ok "tech has the service table" || die "tech table"
+call oleg PUT "/api/v1/features/$F/gates/tech/document" '{"content":"# x\n"}' >/dev/null; expect 403 "tech is not edited by hand (GEN-03)"
 svcs() { [[ $(field anna GET "/api/v1/features/$F" 'len(d["services"])') == 2 ]]; }
 wait_for "affected services projected from tech" svcs
 call anna POST "/api/v1/features/$F/codegen" >/dev/null; expect 409 "codegen before approval (CG-01)"
@@ -189,6 +197,7 @@ field anna GET /api/v1/focus 'len(d["research"])' | grep -qE '^[0-9]+$' && ok "I
 field anna GET "/api/v1/overview?domain=all" 'len(d["issues"]) + len(d["features"]) + len(d["releases"])' | grep -qE '^[0-9]+$' && ok "Overview in three columns" || die "overview"
 call anna POST /api/v1/chat/messages '{"text":"hello agent","mode":"general"}' >/dev/null; expect 202 "chat question accepted"
 wait_for "answer streamed over SSE" grep -q "agent.done" "$TMP/sse"
+[[ $(field admin GET /admin/api/v1/agent/usage 'd["totals"]["runs"]') -ge 1 ]] && ok "agent usage recorded (USE-01)" || die "no usage"
 grep -q "issue.updated" "$TMP/sse" && ok "issue.updated events over SSE" || die "sse issue.updated"
 grep -q "release.updated" "$TMP/sse" && ok "release.updated events over SSE" || die "sse release.updated"
 kill $SSE 2>/dev/null || true; wait $SSE 2>/dev/null || true
