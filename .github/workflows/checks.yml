@@ -16,3 +16,24 @@ jobs:
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
+      # actionlint не разбирает jq: сборка payload выкатки компилируется и даёт
+      # нужные ключи с необязательным секретом и без него.
+      - name: jq payload deploy-component.yml
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, subprocess, sys
+          s = open(".github/workflows/deploy-component.yml", encoding="utf-8").read()
+          exprs = re.findall(r"payload=\$\(jq -cn '(.*?)'\)", s, re.S)
+          assert len(exprs) == 2, f"payload expressions: {len(exprs)}"
+          env = dict(os.environ, IMAGE="img", HAMMURAPI_GHCR_PULL_TOKEN="g", HAMMURAPI_SPEC_REPO="o/r",
+                     HAMMURAPI_GITHUB_APP_ID="1", HAMMURAPI_GITHUB_CLIENT_ID="c", HAMMURAPI_BOOTSTRAP_ADMINS="a",
+                     HAMMURAPI_GITHUB_APP_PRIVATE_KEY="k", HAMMURAPI_GITHUB_CLIENT_SECRET="s",
+                     HAMMURAPI_WEBHOOK_SECRET="w", HAMMURAPI_TOKEN_ENCRYPTION_KEY="t")
+          for key in ("", "sk-x"):
+              env["HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY"] = key
+              core = json.loads(subprocess.run(["jq", "-cn", exprs[0]], env=env, check=True, capture_output=True, text=True).stdout)
+              web = json.loads(subprocess.run(["jq", "-cn", exprs[1]], env=env, check=True, capture_output=True, text=True).stdout)
+              assert ("BOOTSTRAP_DEEPSEEK_API_KEY" in core["secrets"]) == bool(key), core["secrets"].keys()
+              assert core["image"] == "img" and core["config"]["GIT_REPO"] == "o/r" and web == {"image": "img", "ghcrPullToken": "g"}
+          print("payload ok")
+          EOF
