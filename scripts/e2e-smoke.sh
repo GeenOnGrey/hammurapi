@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test of the closed cycle (HMR.CMN-0002) against the demo stack:
+# End-to-end smoke test of the closed cycle (FTR.HMR.CMN-0002) against the demo stack:
 #   docker compose --profile demo up -d --build && scripts/e2e-smoke.sh
 # Uses the fake GitLab (sign-in as any login; specification and service
 # repositories, MRs, CI results, deploy target, Prometheus) and the real agent
@@ -63,7 +63,7 @@ call anna POST /admin/api/v1/domains '{"key":"XX","name":"x"}' >/dev/null; expec
 call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":true,"areaAdmin":["product"]}' >/dev/null; expect 204 "roles: global admin + product area admin (no editor/approver roles)"
 call admin PUT "/admin/api/v1/users/$ADMIN_ID/roles" '{"globalAdmin":false,"areaAdmin":[]}' >/dev/null; expect 409 "last global admin cannot be removed"
 
-echo "Agent configuration (HMR.CMN-0004)"
+echo "Agent configuration (FTR.HMR.CMN-0004)"
 conn=$(call admin GET /admin/api/v1/agent/connections); expect 200 "Admin → Agent: connections"
 [[ $(echo "$conn" | json 'len(d["items"])') -ge 1 ]] && ok "the first LLM connection from BOOTSTRAP_DEEPSEEK_API_KEY" || die "no connection: $conn"
 call anna GET /admin/api/v1/agent/connections >/dev/null; expect 403 "the Agent section is for global administrators only"
@@ -191,6 +191,33 @@ wait_for "revert PRs by the bot, merged, redeployed; spec PR closed (RB-02…RB-
 [[ $(field anna GET "/api/v1/features/$F2" 'd["phase"]') == rolled_back ]] && ok "feature rolled back" || die "feature phase"
 call anna GET "/api/v1/issues/$ISS2" | json 'd["rolledBackRelease"]' | grep -q "$R2" && ok "issue returned with a link to the release (RB-06)" || die "issue link"
 field anna GET "/api/v1/releases/$R2" '[p["kind"] for p in d["prs"]]' | grep -q revert && ok "revert PRs recorded in the release" || die "revert PRs"
+
+echo "Specification navigator and repository check (FTR.HMR.CMN-0005)"
+# push_spec <path> <content>: a commit straight to main of the specification repository, past Hammurapi.
+push_spec() {
+  "$PY" -c 'import json,sys; print(json.dumps({"project": sys.argv[1], "branch": "main", "message": "direct push", "files": {sys.argv[2]: sys.argv[3]}}))' \
+    "${SPEC_REPO:-demo/specs}" "$1" "$2" | curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d @- "$GITLAB/fake/push" | grep -q 201 || die "push $1"
+}
+call admin POST /admin/api/v1/spec-scan/runs >/dev/null; expect 202 "Check now (SCN-04)"
+in_tree() { call anna GET /api/v1/spec/tree | grep -q "\"$1\""; }
+wait_for "released $F is in the navigator (R12)" in_tree "$F"
+doc=$(call anna GET "/api/v1/spec/documents/$F/product")
+echo "$doc" | json 'd["feature"]["issues"][0]["key"]' | grep -q "$ISS" && ok "document header links the issue $ISS (R20)" || die "issues in header: $doc"
+echo "$doc" | json '[p["kind"] for p in d["feature"]["pullRequests"]]' | grep -q service && ok "document header links merged service PRs (R20)" || die "PRs in header"
+push_spec "specs/FMS/CAR/FTR.FMS.CAR-0042/product/spec.md" $'# Indexed from git\n\n## Requirements\n\n**R1.** Weekend surcharge for vans.\n- Given a van, when booked on Saturday, then the surcharge applies.\n'
+indexed() { [[ $(field anna GET /api/v1/features/FTR.FMS.CAR-0042 'd["phase"]') == indexed ]]; }
+wait_for "a specification pushed past Hammurapi is indexed as implemented (R2, R4)" indexed
+call anna GET "/api/v1/spec/search?q=surcharge" | json 'd["items"][0]["featureKey"]' | grep -q FTR.FMS.CAR-0042 && ok "full-text search finds it (R14)" || die "search"
+push_spec "specs/FMS/CAR/FMS.CAR-0099/product/spec.md" $'# Old format\n'
+push_spec "specs/LOG/DLV/FTR.LOG.DLV-0003/product/spec.md" $'# Deliveries\n'
+spec_focus() { call admin GET /api/v1/focus | json '[i["action"] for i in d.get("spec", [])]' | grep -q "$1"; }
+wait_for "old ID format is an indexing problem in focus (R3, R10)" spec_focus bad_id
+wait_for "missing domain is an indexing problem in focus (R6, R10)" spec_focus missing_catalog
+call admin GET /admin/api/v1/spec-scan/missing-catalog | json 'd["items"][0]["domain"]' | grep -q LOG && ok "domains page lists LOG/DLV with the waiting specification" || die "missing catalog"
+call admin POST /admin/api/v1/domains '{"key":"LOG","name":"Logistics","approvalRequired":false}' >/dev/null; expect 201 "domain LOG added"
+call admin POST /admin/api/v1/domains/LOG/systems '{"key":"DLV","name":"Deliveries"}' >/dev/null; expect 201 "system LOG/DLV added"
+log_indexed() { [[ $(field anna GET /api/v1/features/FTR.LOG.DLV-0003 'd["phase"]') == indexed ]]; }
+wait_for "the waiting specification is indexed by the extra check (CAT-03)" log_indexed
 
 echo "General section (R37) and chat"
 field anna GET /api/v1/focus 'len(d["research"])' | grep -qE '^[0-9]+$' && ok "In focus answers by stage" || die "focus"

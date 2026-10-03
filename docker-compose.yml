@@ -13,7 +13,7 @@
 #
 # The cleaner runs on demand: docker compose run --rm api cleaner
 #
-# The agent (HMR.CMN-0004) is the operator service "agent": a Pi process per chat
+# The agent (FTR.HMR.CMN-0004) is the operator service "agent": a Pi process per chat
 # or task session, from the release image of hammurapi-core. LLM connections and
 # models are set in Admin → Agent; BOOTSTRAP_DEEPSEEK_API_KEY creates the first one.
 #

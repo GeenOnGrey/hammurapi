@@ -62,6 +62,24 @@ See [git-providers.md](git-providers.md) and [cycle.md](cycle.md).
 Deploy settings, the feature-flag webhook, the Backstage catalog, stage and metric sources are not
 environment variables: administrators set them in the web app (see [cycle.md](cycle.md)).
 
+## Specification index
+
+The worker checks the default branch of the specification repository and indexes specifications
+added past Hammurapi as implemented; the index serves the **Specification** section, its search and
+the agent's `spec_*` tools. The period of the check is not an environment variable: a global
+administrator sets it in **Administration → Settings** (default every hour).
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SPEC_SCAN_PUSH_DEBOUNCE` | Delay of the check after a push to the default branch (a series of pushes gives one check) | `30s` |
+| `SPEC_SCAN_PUSH_DEBOUNCE_MAX` | Pushes never delay the check longer than this after the first one | `5m` |
+| `SPEC_SCAN_MAX_FILE_BYTES` | A larger `spec.md` is searchable by its title and headings only | `2MB` |
+| `SPEC_SCAN_TIMEOUT` | Limit of one check | `15m` |
+| `SPEC_FILE_PREVIEW_MAX_BYTES` | Larger files of an area are offered for download only | `5MB` |
+| `SPEC_SEARCH_MAX_LIMIT` | Results per page of `/api/v1/spec/search` at most | `50` |
+| `SPEC_AGENT_READ_MAX_CHARS` | `spec_read` returns longer documents by sections | `40000` |
+| `SPEC_AGENT_PAGE_SIZE` | Page of `spec_search` and `spec_references` | `20` |
+
 ## Users
 
 | Variable | Purpose | Default |

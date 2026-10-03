@@ -1,4 +1,4 @@
-# The agent operator (HMR.CMN-0004): a Pi process per chat or task session.
+# The agent operator (FTR.HMR.CMN-0004): a Pi process per chat or task session.
 # It gets only its token: LLM keys, MCP servers and skills arrive with each
 # session request from api, worker and runner tasks.
 apiVersion: apps/v1

@@ -1,6 +1,6 @@
 # Development cycle: setup and integrations
 
-Hammurapi runs a feature from an issue to a confirmed release (HMR.CMN-0002):
+Hammurapi runs a feature from an issue to a confirmed release (FTR.HMR.CMN-0002):
 
 ```text
 Discovery     issue (idea | problem) → Analysis by the agent → accepted
@@ -198,3 +198,27 @@ with a link to the release and starts a new Analysis.
   the same; Kafka still carries git provider events.
 - R30 (metric window evaluation) and R35 (automatic Problem issue on a failed metric) are planned
   for the next release.
+
+## Specifications added past Hammurapi (repository check)
+
+Specifications can reach the default branch without Hammurapi: a manual import, a migration from
+another system, a direct commit. The worker checks the default branch every hour (Administration →
+Settings → Repository check; 15 minutes to 24 hours, or "Check now") and after every push to it.
+
+- A new specification is a folder `specs/<DOMAIN>/<SYSTEM>/<ID>/` with at least one
+  `<area>/spec.md` whose ID Hammurapi does not know. Folders on other branches are ignored.
+- The ID must be `FTR.<DOMAIN>.<SYSTEM>-NNNN` with the domain and the system of the path. The MVP
+  format (`FMS.CAR-0011`) and other names are reported with the fix (e.g. rename to
+  `FTR.FMS.CAR-0011`) and are not indexed.
+- The domain and the system must be in the catalog. Missing ones are listed on the Domains page with
+  "Add" (or, with Backstage, an example of `catalog-info.yaml`); adding them starts an extra check.
+- A valid specification is indexed as **implemented**: a feature in phase *Indexed*, without gates,
+  not in Development or Delivery; the title is the first heading of `product/spec.md`. It can be the
+  parent of a fix (`parent:` in the front matter of the fix), and the system's counter moves past its
+  number. Change it with a fix feature.
+- A folder of an indexed or released feature that disappears from the branch is reported; the
+  feature stays in Hammurapi.
+
+Problems of the check are in "In focus" of global administrators and in the check's section of
+Settings. The **Specification** section shows every document of the default branch of known
+features, with search; it follows pushes within seconds.

@@ -61,6 +61,13 @@ Hammurapi gives each session its MCP server with a grant that decides which tool
 sees: `<INTERNAL_URL>/mcp` for the chat and runner tasks, the worker's own server
 (`WORKER_MCP_URL`, `:8083`) for background scenarios.
 
+In every scenario the agent also reads the specification of the default branch through read-only
+tools over the same index as the **Specification** section (FTR.HMR.CMN-0005): `spec_tree` (domains,
+systems, features), `spec_search` (full text and ID prefix, 20 per page), `spec_read` (a document
+or one section; long documents come with the table of contents and the sections left out),
+`spec_requirements` (R1… with acceptance criteria) and `spec_references` (where a feature or a
+requirement is mentioned).
+
 | Tool | Chat | Discovery | Gate generation | Check | Runner task |
 | --- | --- | --- | --- | --- | --- |
 | `list_issues`, `read_issue`, `list_features`, `search_specs` | yes | yes | yes | yes | no |

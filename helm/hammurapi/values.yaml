@@ -29,7 +29,7 @@ worker:
   replicas: 1
   # Agent scenarios (Analysis, gate generation, checks) and the MCP of task sessions (:8083).
   resources: { requests: { cpu: 200m, memory: 512Mi } }
-# The agent operator (HMR.CMN-0004): a Pi process per chat or task session. One replica:
+# The agent operator (FTR.HMR.CMN-0004): a Pi process per chat or task session. One replica:
 # sessions live in the process; chats restore from S3 snapshots after a restart.
 agent:
   resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 3Gi } }

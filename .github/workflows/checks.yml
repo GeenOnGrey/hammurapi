@@ -1,4 +1,4 @@
-# Проверки переиспользуемых workflow (HMR.INFRA-0002, QUAL-01). Поведение шага проверки
+# Проверки переиспользуемых workflow (FTR.HMR.INFRA-0002, QUAL-01). Поведение шага проверки
 # конфигурации deploy-component.yml покрыто bats-тестами hammurapi-infra (tests/unit/public.bats).
 name: checks
 on:

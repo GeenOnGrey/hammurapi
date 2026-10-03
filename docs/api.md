@@ -1,8 +1,8 @@
 # HTTP API
 
 The SPA uses the same API as any other client. Full contracts: the tech specifications
-`hammurapi-specs/specs/PLT/HMR/HMR.CMN-0001/tech/spec.md` (specifications and gates) and
-`HMR.CMN-0002/tech/spec.md` (the development cycle).
+`hammurapi-specs/specs/PLT/HMR/FTR.HMR.CMN-0001/tech/spec.md` (specifications and gates) and
+`FTR.HMR.CMN-0002/tech/spec.md` (the development cycle).
 
 | Prefix | Purpose | Authentication |
 | --- | --- | --- |
